@@ -18,7 +18,7 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
-RECORD_SECONDS = 5  # Process audio in 5-second chunks
+RECORD_SECONDS = 8  # Process audio in 8-second chunks for better context
 
 def setup_audio():
     """Initialize PyAudio"""
@@ -60,8 +60,8 @@ def main():
                         help='Whisper model size (default: base)')
     parser.add_argument('-d', '--device', type=int, 
                         help='Audio input device index (optional)')
-    parser.add_argument('-c', '--chunk-duration', type=int, default=5,
-                        help='Duration of audio chunks to process in seconds (default: 5)')
+    parser.add_argument('-c', '--chunk-duration', type=int, default=8,
+                        help='Duration of audio chunks to process in seconds (default: 8)')
     
     args = parser.parse_args()
     
@@ -123,9 +123,18 @@ def main():
                 # Convert to format Whisper expects
                 audio_np = frames_to_audio(frames)
                 
-                # Transcribe
+                # Transcribe with optimized parameters
                 print(f"[Chunk {chunk_num}] Transcribing...")
-                result = model.transcribe(audio_np, language='en', fp16=False)
+                result = model.transcribe(
+                    audio_np,
+                    language='en',
+                    fp16=False,
+                    condition_on_previous_text=True,  # Better context between chunks
+                    temperature=0.0,  # More deterministic, less hallucination
+                    compression_ratio_threshold=2.4,  # Filter out non-speech/garbage
+                    logprob_threshold=-1.0,  # Filter low-confidence segments
+                    no_speech_threshold=0.6  # Better silence detection
+                )
                 text = result['text'].strip()
                 
                 if text:
