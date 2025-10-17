@@ -9,6 +9,7 @@ ENV/
 transcription*.txt
 *_notes.txt
 *_transcript.txt
+!requirements.txt
 
 # Python
 __pycache__/
