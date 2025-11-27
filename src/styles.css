@@ -157,9 +157,14 @@ body::before {
   box-shadow: 0 0 8px var(--success);
 }
 
-.status-dot.recording {
+.status-dot.disconnected {
   background: var(--danger);
   box-shadow: 0 0 8px var(--danger);
+}
+
+.status-dot.recording {
+  background: var(--warning);
+  box-shadow: 0 0 8px var(--warning);
   animation: pulse 1.5s ease-in-out infinite;
 }
 

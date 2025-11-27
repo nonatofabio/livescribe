@@ -9,9 +9,11 @@ const WS_URL = 'ws://127.0.0.1:8765/ws/transcribe';
 // State
 let ws = null;
 let isRecording = false;
+let isBackendOnline = false;
 let transcriptEntries = [];
 let totalWords = 0;
 let totalChunks = 0;
+let healthCheckInterval = null;
 
 // DOM Elements
 const elements = {
@@ -37,8 +39,9 @@ const elements = {
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
-  await loadDevices();
-  updateStatus('ready', 'Ready');
+  await checkBackendHealth();
+  // Start periodic health check every 3 seconds
+  healthCheckInterval = setInterval(checkBackendHealth, 3000);
 });
 
 function setupEventListeners() {
@@ -54,6 +57,36 @@ function setupEventListeners() {
 }
 
 // API Functions
+async function checkBackendHealth() {
+  try {
+    const response = await fetch(`${API_BASE}/status`, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(2000) // 2 second timeout
+    });
+    
+    if (response.ok) {
+      if (!isBackendOnline) {
+        isBackendOnline = true;
+        await loadDevices();
+        if (!isRecording) {
+          updateStatus('connected', 'Connected');
+        }
+      }
+    } else {
+      throw new Error('Backend not responding');
+    }
+  } catch (error) {
+    if (isBackendOnline) {
+      isBackendOnline = false;
+      updateStatus('disconnected', 'Disconnected');
+      elements.startBtn.disabled = true;
+    } else if (!isBackendOnline) {
+      updateStatus('disconnected', 'Disconnected');
+      elements.startBtn.disabled = true;
+    }
+  }
+}
+
 async function loadDevices() {
   try {
     const response = await fetch(`${API_BASE}/devices`);
@@ -70,11 +103,9 @@ async function loadDevices() {
       elements.deviceSelect.appendChild(option);
     });
     
-    updateStatus('connected', 'Connected');
+    elements.startBtn.disabled = false;
   } catch (error) {
     console.error('Failed to load devices:', error);
-    updateStatus('disconnected', 'Backend offline');
-    showToast('Cannot connect to backend. Make sure it is running.', 'error');
   }
 }
 
@@ -185,8 +216,10 @@ function handleWebSocketMessage(data) {
 function updateStatus(state, text) {
   elements.statusIndicator.className = 'status-dot';
   
-  if (state === 'connected' || state === 'ready') {
+  if (state === 'connected') {
     elements.statusIndicator.classList.add('connected');
+  } else if (state === 'disconnected') {
+    elements.statusIndicator.classList.add('disconnected');
   } else if (state === 'recording') {
     elements.statusIndicator.classList.add('recording');
   }
