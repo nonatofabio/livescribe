@@ -218,15 +218,27 @@ async def websocket_transcribe(websocket: WebSocket):
                     audio_np,
                     language=language,
                     fp16=False,
-                    condition_on_previous_text=True,
+                    condition_on_previous_text=False,  # Prevents hallucination loops
                     temperature=0.0,
-                    compression_ratio_threshold=2.4,
-                    logprob_threshold=-1.0,
-                    no_speech_threshold=0.6
+                    compression_ratio_threshold=1.8,   # Lower = stricter repetition filter
+                    logprob_threshold=-0.5,            # Higher = stricter confidence filter
+                    no_speech_threshold=0.7            # Higher = better silence detection
                 )
             
             result = await loop.run_in_executor(None, do_transcribe)
             text = result['text'].strip()
+            
+            # Post-processing: detect and reject hallucination loops
+            if text:
+                words = text.split()
+                if len(words) >= 6:
+                    # Check for excessive repetition (same phrase 3+ times)
+                    phrase_len = len(words) // 3
+                    if phrase_len >= 2:
+                        first_phrase = ' '.join(words[:phrase_len])
+                        repetitions = text.count(first_phrase)
+                        if repetitions >= 3:
+                            text = ""  # Reject as hallucination
             
             if text:
                 timestamp = datetime.now().strftime('%H:%M:%S')

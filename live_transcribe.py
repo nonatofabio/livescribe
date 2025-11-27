@@ -123,19 +123,30 @@ def main():
                 # Convert to format Whisper expects
                 audio_np = frames_to_audio(frames)
                 
-                # Transcribe with optimized parameters
+                # Transcribe with anti-hallucination parameters
                 print(f"[Chunk {chunk_num}] Transcribing...")
                 result = model.transcribe(
                     audio_np,
                     language='en',
                     fp16=False,
-                    condition_on_previous_text=True,  # Better context between chunks
-                    temperature=0.0,  # More deterministic, less hallucination
-                    compression_ratio_threshold=2.4,  # Filter out non-speech/garbage
-                    logprob_threshold=-1.0,  # Filter low-confidence segments
-                    no_speech_threshold=0.6  # Better silence detection
+                    condition_on_previous_text=False,  # Prevents hallucination loops
+                    temperature=0.0,  # More deterministic
+                    compression_ratio_threshold=1.8,   # Lower = stricter repetition filter
+                    logprob_threshold=-0.5,            # Higher = stricter confidence
+                    no_speech_threshold=0.7            # Higher = better silence detection
                 )
                 text = result['text'].strip()
+                
+                # Detect and reject hallucination loops (repeated phrases)
+                if text:
+                    words = text.split()
+                    if len(words) >= 6:
+                        phrase_len = len(words) // 3
+                        if phrase_len >= 2:
+                            first_phrase = ' '.join(words[:phrase_len])
+                            if text.count(first_phrase) >= 3:
+                                print(f"[Chunk {chunk_num}] Hallucination detected, skipping")
+                                text = ""
                 
                 if text:
                     timestamp = datetime.now().strftime('%H:%M:%S')
