@@ -5,9 +5,12 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# Python virtual environments
 env/
 venv/
 .venv/
+.python-version.local
 
 # Build outputs
 dist/

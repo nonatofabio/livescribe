@@ -28,7 +28,18 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install node
 ```
 
-3. **Python 3.10+** with pip
+3. **pyenv** (Python version manager)
+```bash
+brew install pyenv
+
+# Add to your shell (~/.zshrc or ~/.bashrc)
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zshrc
+echo '[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zshrc
+echo 'eval "$(pyenv init - zsh)"' >> ~/.zshrc
+
+# Restart shell or run
+source ~/.zshrc
+```
 
 4. **PortAudio** (required for PyAudio)
 ```bash
@@ -41,11 +52,19 @@ brew install portaudio
 # Clone the repo
 cd livescribe
 
-# Install Node dependencies
-npm install
+# Install Python version (uses .python-version file)
+pyenv install 3.11.9
+pyenv local 3.11.9  # Already set via .python-version
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate
 
 # Install Python backend dependencies
 pip install -r backend/requirements.txt
+
+# Install Node dependencies
+npm install
 ```
 
 ### (Optional) Capture Internal Audio
@@ -69,6 +88,9 @@ Configure your Mac's audio:
 
 **Development mode:**
 ```bash
+# Activate virtual environment first
+source .venv/bin/activate
+
 # Terminal 1: Start Python backend
 python backend/transcription_server.py
 

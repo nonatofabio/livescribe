@@ -15,6 +15,18 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
+# Activate virtual environment if it exists
+if [ -d ".venv" ]; then
+    echo -e "${BLUE}Activating Python virtual environment...${NC}"
+    source .venv/bin/activate
+elif [ -d "venv" ]; then
+    echo -e "${BLUE}Activating Python virtual environment...${NC}"
+    source venv/bin/activate
+else
+    echo -e "${BLUE}No virtual environment found. Using system Python.${NC}"
+    echo -e "${BLUE}Tip: Create one with 'python -m venv .venv'${NC}"
+fi
+
 # Check if Python backend dependencies are installed
 echo -e "${BLUE}Checking Python dependencies...${NC}"
 pip install -q -r backend/requirements.txt
