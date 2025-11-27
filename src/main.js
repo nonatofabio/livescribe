@@ -219,7 +219,9 @@ function handleWebSocketMessage(data) {
       break;
       
     case 'silence':
-      // Optionally show silence indicator
+      // Count all processed chunks, including silence
+      totalChunks++;
+      updateStats();
       break;
       
     case 'error':
