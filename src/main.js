@@ -114,6 +114,22 @@ async function startRecording() {
   if (isRecording) return;
   
   try {
+    // Load selected model first
+    const selectedModel = elements.modelSelect.value;
+    showToast(`Loading ${selectedModel} model...`, 'info');
+    
+    const modelResponse = await fetch(`${API_BASE}/load-model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: selectedModel })
+    });
+    
+    const modelResult = await modelResponse.json();
+    if (!modelResult.success) {
+      showToast(`Failed to load model: ${modelResult.error}`, 'error');
+      return;
+    }
+    
     // Connect WebSocket
     ws = new WebSocket(WS_URL);
     
