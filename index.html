@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiveScribe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" x2="12" y1="19" y2="22"/>
+          </svg>
+        </div>
+        <span class="logo-text">LiveScribe</span>
+      </div>
+      <div class="header-status">
+        <span id="status-indicator" class="status-dot"></span>
+        <span id="status-text">Disconnected</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Controls Panel -->
+      <aside class="controls-panel">
+        <div class="panel-section">
+          <h3 class="panel-title">Configuration</h3>
+          
+          <div class="control-group">
+            <label for="model-select">Whisper Model</label>
+            <select id="model-select" class="select">
+              <option value="tiny">Tiny (39 MB) - Fastest</option>
+              <option value="base" selected>Base (74 MB) - Fast</option>
+              <option value="small">Small (244 MB) - Balanced</option>
+              <option value="medium">Medium (769 MB) - Accurate</option>
+              <option value="large">Large (1.5 GB) - Best</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="device-select">Audio Device</label>
+            <select id="device-select" class="select">
+              <option value="">Loading devices...</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="chunk-slider">
+              Chunk Duration: <span id="chunk-value">8</span>s
+            </label>
+            <input type="range" id="chunk-slider" class="slider" min="3" max="15" value="8">
+          </div>
+
+          <div class="control-group">
+            <label for="language-select">Language</label>
+            <select id="language-select" class="select">
+              <option value="en">English</option>
+              <option value="pt">Portuguese</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="ja">Japanese</option>
+              <option value="zh">Chinese</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <button id="start-btn" class="btn btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="12" r="10"/>
+            </svg>
+            Start Recording
+          </button>
+          <button id="stop-btn" class="btn btn-danger" disabled>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+            Stop
+          </button>
+        </div>
+
+        <div class="panel-section">
+          <h3 class="panel-title">Session</h3>
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-value" id="chunks-count">0</span>
+              <span class="stat-label">Chunks</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value" id="words-count">0</span>
+              <span class="stat-label">Words</span>
+            </div>
+          </div>
+          <button id="clear-btn" class="btn btn-ghost">Clear Transcript</button>
+          <button id="copy-btn" class="btn btn-ghost">Copy to Clipboard</button>
+          <button id="save-btn" class="btn btn-ghost">Save as File</button>
+        </div>
+      </aside>
+
+      <!-- Transcript Area -->
+      <section class="transcript-area">
+        <div class="transcript-header">
+          <h2>Transcript</h2>
+          <div id="recording-indicator" class="recording-indicator hidden">
+            <span class="pulse"></span>
+            Recording...
+          </div>
+        </div>
+        <div id="transcript-content" class="transcript-content">
+          <div class="empty-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" x2="12" y1="19" y2="22"/>
+            </svg>
+            <p>Start recording to see transcription</p>
+            <span>Configure settings and click "Start Recording"</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
+
