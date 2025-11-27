@@ -18,7 +18,7 @@ CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
-RECORD_SECONDS = 8  # Process audio in 8-second chunks for better context
+RECORD_SECONDS = 3  # Process audio in 3-second chunks for faster feedback
 
 def setup_audio():
     """Initialize PyAudio"""
@@ -60,8 +60,8 @@ def main():
                         help='Whisper model size (default: base)')
     parser.add_argument('-d', '--device', type=int, 
                         help='Audio input device index (optional)')
-    parser.add_argument('-c', '--chunk-duration', type=int, default=8,
-                        help='Duration of audio chunks to process in seconds (default: 8)')
+    parser.add_argument('-c', '--chunk-duration', type=int, default=3,
+                        help='Duration of audio chunks to process in seconds (default: 3)')
     
     args = parser.parse_args()
     

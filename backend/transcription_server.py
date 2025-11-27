@@ -145,7 +145,7 @@ async def websocket_transcribe(websocket: WebSocket):
         config = json.loads(config_data)
         
         device_index = config.get("device")
-        chunk_duration = config.get("chunk_duration", 8)
+        chunk_duration = config.get("chunk_duration", 3)
         language = config.get("language", "en")
         
         # Load model if not loaded
