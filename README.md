@@ -1,88 +1,104 @@
-# Live Audio Transcription
+# LiveScribe
 
-A simple, effective live transcription tool for macOS that captures audio from your microphone or internal audio and transcribes it in real-time using OpenAI's Whisper model.
+A modern, real-time audio transcription app for macOS using OpenAI's Whisper model. Now with a beautiful desktop GUI built with Tauri!
 
 ## Features
 
-- 🎤 Real-time audio transcription
-- 📝 Continuous output to text file with timestamps
-- 🔊 Support for both microphone and internal audio (with additional setup)
-- ⚙️ Multiple Whisper model sizes (tiny, base, small, medium, large)
-- 🎯 Simple CLI interface
-- ⏱️ Configurable chunk duration for processing
+- 🎤 Real-time audio transcription with Whisper
+- 🖥️ Modern desktop app (Tauri - lightweight, ~15MB)
+- 📝 Live transcript with timestamps
+- 🔊 Support for microphone and internal audio (via BlackHole)
+- ⚙️ Multiple Whisper model sizes (tiny → large)
+- 🌍 Multi-language support
+- 📋 Copy to clipboard / Save to file
+- ⏱️ Configurable chunk duration
+- 🎨 Beautiful dark theme UI
 
 ## Installation
 
-### 1. Install Python Dependencies
+### Prerequisites
 
+1. **Rust** (for Tauri)
 ```bash
-pip install -r requirements.txt
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### 2. Install PortAudio (required for PyAudio)
+2. **Node.js** (v18+)
+```bash
+brew install node
+```
 
-On macOS, install via Homebrew:
+3. **Python 3.10+** with pip
 
+4. **PortAudio** (required for PyAudio)
 ```bash
 brew install portaudio
 ```
 
-### 3. (Optional) Capture Internal Audio
+### Setup
 
-To transcribe system audio (e.g., from video calls, browser audio), you need to install **BlackHole**:
+```bash
+# Clone the repo
+cd livescribe
+
+# Install Node dependencies
+npm install
+
+# Install Python backend dependencies
+pip install -r backend/requirements.txt
+```
+
+### (Optional) Capture Internal Audio
+
+To transcribe system audio (video calls, browser audio), install **BlackHole**:
 
 ```bash
 brew install blackhole-2ch
 ```
 
-Then configure your Mac's audio settings:
-1. Open **Audio MIDI Setup** (in Applications > Utilities)
-2. Click the **+** button and create a **Multi-Output Device**
-3. Check both **BlackHole 2ch** and your **Built-in Output**
-4. In **System Settings > Sound**, select the Multi-Output Device as your output
-5. When running the script, select BlackHole as the input device
+Configure your Mac's audio:
+1. Open **Audio MIDI Setup** (Applications > Utilities)
+2. Click **+** → Create **Multi-Output Device**
+3. Check **BlackHole 2ch** and **Built-in Output**
+4. In **System Settings > Sound**, select Multi-Output as output
+5. In LiveScribe, select BlackHole as input device
 
 ## Usage
 
-### Basic Usage (Microphone)
+### Desktop App (Recommended)
+
+**Development mode:**
+```bash
+# Terminal 1: Start Python backend
+python backend/transcription_server.py
+
+# Terminal 2: Start Tauri dev
+npm run tauri:dev
+```
+
+Or use the convenience script:
+```bash
+chmod +x scripts/dev.sh
+./scripts/dev.sh
+```
+
+**Build for production:**
+```bash
+npm run tauri:build
+```
+
+The built app will be in `src-tauri/target/release/bundle/`.
+
+### CLI Mode (Original)
+
+Still works for headless/scripting use:
 
 ```bash
 python live_transcribe.py
+
+# Options
+python live_transcribe.py --model small --output notes.txt --chunk-duration 10
 ```
-
-This will:
-- Use your default microphone
-- Use the "base" Whisper model
-- Save transcription to `transcription.txt`
-
-### Advanced Options
-
-```bash
-# Use a specific Whisper model (tiny, base, small, medium, large)
-python live_transcribe.py --model small
-
-# Save to a custom file
-python live_transcribe.py --output my_notes.txt
-
-# Use a specific audio input device
-python live_transcribe.py --device 2
-
-# Adjust chunk duration (seconds of audio to process at once)
-python live_transcribe.py --chunk-duration 10
-
-# Combine options
-python live_transcribe.py --model medium --output meeting_notes.txt --chunk-duration 8
-```
-
-### List Available Audio Devices
-
-Run the script and it will show all available input devices:
-
-```bash
-python live_transcribe.py
-```
-
-Look for device numbers in the output, then use the `--device` flag to select one.
 
 ## Whisper Model Sizes
 
