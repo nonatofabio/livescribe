@@ -178,3 +178,10 @@ pip install pyaudio
 ## License
 
 This project uses OpenAI's Whisper model, which is released under the MIT License.
+
+# TODO
+Check the main script for more. 
+
+- [ ] Add diarization with name recognition. 
+- [ ] Create live annotation cli with shortcuts for notes and questions
+- [ ] EasterEgg: this may become part of the simpleassistant.ai stack

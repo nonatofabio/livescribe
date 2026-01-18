@@ -149,6 +149,8 @@ def main():
                     f.flush()  # Ensure it's written immediately
                 else:
                     print(f"[Chunk {chunk_num}] No speech detected\n")
+
+                #TODO: Add optional LLM live summarization with local Ollama
                     
         except KeyboardInterrupt:
             print("\n\nStopping transcription...")
