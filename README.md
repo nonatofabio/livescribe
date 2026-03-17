@@ -1,126 +1,121 @@
-# Live Audio Transcription
+# Livescribe
 
-A simple, effective live transcription tool for macOS that captures audio from your microphone or internal audio and transcribes it in real-time using OpenAI's Whisper model.
+A fast, cross-platform live audio transcription tool built in Rust. Captures audio from your microphone and transcribes it in real-time using [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 
 ## Features
 
-- 🎤 Real-time audio transcription
-- 📝 Continuous output to text file with timestamps
-- 🔊 Support for both microphone and internal audio (with additional setup)
-- ⚙️ Multiple Whisper model sizes (tiny, base, small, medium, large)
-- 🎯 Simple CLI interface
-- ⏱️ Configurable chunk duration for processing
+- **Non-blocking pipeline**: Recording never stops while transcription runs — audio capture and inference happen on separate threads
+- **Overlapping chunks**: Consecutive audio chunks overlap (default 2s) to avoid cutting words at boundaries, with automatic deduplication
+- **High-quality default model**: Uses `distil-large-v3` — near large-v3 accuracy at ~6x speed
+- **Auto model download**: Models are downloaded from HuggingFace on first run and cached locally
+- **Cross-platform**: macOS (CoreAudio), Linux (ALSA), Windows (WASAPI) via cpal
+- **GPU acceleration**: Optional Metal (macOS), CUDA (NVIDIA), and CoreML support
 
 ## Installation
 
-### 1. Install Python Dependencies
+### Prerequisites
+
+- Rust toolchain (install via [rustup](https://rustup.rs/))
+- A C/C++ compiler (Xcode Command Line Tools on macOS, gcc on Linux, MSVC on Windows)
+- On Linux: `libasound2-dev` (Debian/Ubuntu) or `alsa-lib-devel` (Fedora)
+
+### Build
 
 ```bash
-pip install -r requirements.txt
+# Standard CPU build
+cargo build --release
+
+# macOS with Metal GPU acceleration
+cargo build --release --features metal
+
+# NVIDIA GPU acceleration
+cargo build --release --features cuda
 ```
 
-### 2. Install PortAudio (required for PyAudio)
-
-On macOS, install via Homebrew:
-
-```bash
-brew install portaudio
-```
-
-### 3. (Optional) Capture Internal Audio
-
-To transcribe system audio (e.g., from video calls, browser audio), you need to install **BlackHole**:
-
-```bash
-brew install blackhole-2ch
-```
-
-Then configure your Mac's audio settings:
-1. Open **Audio MIDI Setup** (in Applications > Utilities)
-2. Click the **+** button and create a **Multi-Output Device**
-3. Check both **BlackHole 2ch** and your **Built-in Output**
-4. In **System Settings > Sound**, select the Multi-Output Device as your output
-5. When running the script, select BlackHole as the input device
+The binary will be at `target/release/livescribe`.
 
 ## Usage
 
-### Basic Usage (Microphone)
+### Basic Usage
 
 ```bash
-python live_transcribe.py
+# Start transcribing with defaults (distil-large-v3 model, 8s chunks, 2s overlap)
+cargo run --release
 ```
 
-This will:
-- Use your default microphone
-- Use the "base" Whisper model
-- Save transcription to `transcription.txt`
+On first run, the model (~1.5 GB) will be downloaded automatically and cached at `~/.cache/livescribe/models/`.
 
-### Advanced Options
+### List Audio Devices
 
 ```bash
-# Use a specific Whisper model (tiny, base, small, medium, large)
-python live_transcribe.py --model small
-
-# Save to a custom file
-python live_transcribe.py --output my_notes.txt
-
-# Use a specific audio input device
-python live_transcribe.py --device 2
-
-# Adjust chunk duration (seconds of audio to process at once)
-python live_transcribe.py --chunk-duration 10
-
-# Combine options
-python live_transcribe.py --model medium --output meeting_notes.txt --chunk-duration 8
+cargo run --release -- --list-devices
 ```
 
-### List Available Audio Devices
-
-Run the script and it will show all available input devices:
+### Options
 
 ```bash
-python live_transcribe.py
+livescribe [OPTIONS]
+
+Options:
+  -o, --output <FILE>           Output file [default: transcription.txt]
+  -m, --model <NAME|PATH>       Whisper model name or path [default: distil-large-v3]
+  -d, --device <INDEX>          Audio input device index
+  -c, --chunk-duration <SECS>   Audio chunk size in seconds [default: 8]
+      --overlap <SECS>          Overlap between chunks in seconds [default: 2]
+  -l, --language <CODE>         Language code [default: en]
+  -t, --threads <N>             Whisper inference threads
+      --list-devices            List audio devices and exit
+  -h, --help                    Print help
 ```
 
-Look for device numbers in the output, then use the `--device` flag to select one.
-
-## Whisper Model Sizes
-
-Choose based on accuracy vs. speed trade-off:
-
-| Model  | Size  | Speed      | Accuracy |
-|--------|-------|------------|----------|
-| tiny   | 39 MB | Fastest    | Good     |
-| base   | 74 MB | Fast       | Better   |
-| small  | 244 MB| Moderate   | Great    |
-| medium | 769 MB| Slower     | Excellent|
-| large  | 1550 MB| Slowest   | Best     |
-
-**Recommendation**: Start with `base` for a good balance. Use `small` or `medium` for better accuracy.
-
-## Examples
-
-### Transcribe a Meeting
+### Examples
 
 ```bash
-python live_transcribe.py --model small --output meeting_2024.txt
+# Transcribe a meeting with medium model
+livescribe --model medium --output meeting.txt
+
+# Quick voice notes with faster model
+livescribe --model small --chunk-duration 5 --output notes.txt
+
+# Use a specific microphone
+livescribe --device 2
+
+# Use a custom model file
+livescribe --model /path/to/custom-model.bin
 ```
 
-### Quick Voice Notes
+## Available Models
 
-```bash
-python live_transcribe.py --model tiny --chunk-duration 3 --output quick_notes.txt
+Models are auto-downloaded on first use. Choose based on accuracy vs. speed:
+
+| Model | Size | Speed | Accuracy |
+|-------|------|-------|----------|
+| `tiny` | 75 MB | Fastest | Good |
+| `base` | 142 MB | Fast | Better |
+| `small` | 466 MB | Moderate | Great |
+| `medium` | 1.5 GB | Slower | Excellent |
+| `large-v3` | 3.1 GB | Slowest | Best |
+| **`distil-large-v3`** | **1.5 GB** | **Fast** | **Near-best** |
+
+**Recommendation**: The default `distil-large-v3` offers the best accuracy-to-speed ratio. Use `small` for lower resource usage.
+
+## Architecture
+
+Livescribe uses a 3-thread producer-consumer pipeline:
+
+```
+[Audio Thread] → [Transcription Thread] → [Output / Main Thread]
+    cpal            whisper.cpp               file + stdout
+ (never stops)     (CPU-bound)              (dedup + write)
 ```
 
-### High-Quality Lecture Recording
+1. **Audio thread**: Continuously captures via cpal, assembles overlapping chunks, sends them through a bounded channel
+2. **Transcription thread**: Runs whisper.cpp inference on each chunk
+3. **Main thread**: Receives results, deduplicates overlap, writes timestamped output
 
-```bash
-python live_transcribe.py --model medium --chunk-duration 10 --output lecture.txt
-```
+Recording never pauses — if transcription falls behind, the oldest pending chunk is dropped rather than blocking audio capture.
 
 ## Output Format
-
-The transcription file includes timestamps for each chunk:
 
 ```
 ============================================================
@@ -128,7 +123,7 @@ Transcription started: 2024-01-15 14:30:00
 ============================================================
 
 [14:30:05] Hello, this is a test of the transcription system.
-[14:30:12] It captures audio in chunks and transcribes them using Whisper.
+[14:30:12] It captures audio in chunks and transcribes them.
 [14:30:20] The output is saved to a text file with timestamps.
 
 ============================================================
@@ -136,52 +131,36 @@ Transcription ended: 2024-01-15 14:32:45
 ============================================================
 ```
 
-## Stopping the Script
+## Capture Internal Audio (macOS)
 
-Press `Ctrl+C` to stop recording and transcription. The output will be properly saved and closed.
+To transcribe system audio (video calls, browser audio), install [BlackHole](https://github.com/ExistentialAudio/BlackHole):
+
+```bash
+brew install blackhole-2ch
+```
+
+1. Open **Audio MIDI Setup** (Applications > Utilities)
+2. Click **+** → Create **Multi-Output Device**
+3. Check both **BlackHole 2ch** and your **Built-in Output**
+4. Set the Multi-Output Device as system output in **System Settings > Sound**
+5. Run livescribe and select BlackHole as the input device
 
 ## Troubleshooting
 
-### "No module named 'pyaudio'"
+### "No default input device found"
+- Check microphone permissions in System Settings > Privacy & Security > Microphone
+- Use `--list-devices` to find the correct device index
 
-Install PortAudio first:
-```bash
-brew install portaudio
-pip install pyaudio
-```
+### High latency / "Transcription falling behind"
+- Use a faster model: `--model small` or `--model base`
+- Increase chunk duration: `--chunk-duration 10`
+- Enable GPU acceleration: build with `--features metal` (macOS) or `--features cuda`
 
-### "Cannot open audio device"
-
-- Check your microphone permissions in **System Settings > Privacy & Security > Microphone**
-- Try listing devices with the script to find the correct device index
-- Make sure no other application is using the microphone
-
-### Poor Transcription Quality
-
-- Use a larger Whisper model (e.g., `--model medium`)
-- Increase chunk duration (`--chunk-duration 10`)
-- Ensure you're speaking clearly and close to the microphone
-- Reduce background noise
-
-### High CPU Usage
-
-- Use a smaller model (e.g., `--model tiny` or `--model base`)
-- Increase chunk duration to process less frequently
-
-## Tips
-
-1. **For best results**: Use the `small` or `medium` model
-2. **For real-time speed**: Use `tiny` or `base` model with shorter chunks
-3. **For meetings**: Use 8-10 second chunks with `small` model
-4. **For voice notes**: Use 3-5 second chunks with `base` model
+### Build errors with whisper-rs
+- Ensure you have a C/C++ compiler installed
+- On macOS: `xcode-select --install`
+- On Linux: `sudo apt install build-essential` (Debian/Ubuntu)
 
 ## License
 
-This project uses OpenAI's Whisper model, which is released under the MIT License.
-
-# TODO
-Check the main script for more. 
-
-- [ ] Add diarization with name recognition. 
-- [ ] Create live annotation cli with shortcuts for notes and questions
-- [ ] EasterEgg: this may become part of the simpleassistant.ai stack
+MIT

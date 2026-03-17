@@ -1,0 +1,27 @@
+[package]
+name = "livescribe"
+version = "0.1.0"
+edition = "2021"
+description = "Live audio transcription using Whisper"
+
+[dependencies]
+whisper-rs = "0.14"
+cpal = "0.15"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+reqwest = { version = "0.12", features = ["blocking"] }
+indicatif = "0.17"
+dirs = "6"
+ctrlc = "3.4"
+chrono = "0.4"
+anyhow = "1"
+
+[features]
+default = []
+metal = ["whisper-rs/metal"]
+cuda = ["whisper-rs/cuda"]
+coreml = ["whisper-rs/coreml"]
+
+[profile.release]
+opt-level = 3
+lto = true
