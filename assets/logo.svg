@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 160" fill="none">
+  <defs>
+    <linearGradient id="mic" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="text-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="480" height="160" rx="16" fill="#0f172a"/>
+
+  <!-- Microphone body -->
+  <rect x="36" y="32" width="28" height="48" rx="14" fill="url(#mic)" opacity="0.95"/>
+
+  <!-- Microphone stand -->
+  <path d="M50 80 L50 100" stroke="url(#mic)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M30 68 Q30 92 50 92 Q70 92 70 68" stroke="url(#mic)" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M40 100 L60 100" stroke="url(#mic)" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Sound waves emanating from mic -->
+  <path d="M74 44 Q82 56 74 68" stroke="url(#wave)" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <path d="M82 36 Q94 56 82 76" stroke="url(#wave)" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <path d="M90 28 Q106 56 90 84" stroke="url(#wave)" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.3"/>
+
+  <!-- Waveform visualization -->
+  <g transform="translate(36, 115)" opacity="0.6">
+    <rect x="0" y="4" width="3" height="12" rx="1.5" fill="url(#wave)"/>
+    <rect x="6" y="0" width="3" height="20" rx="1.5" fill="url(#wave)"/>
+    <rect x="12" y="6" width="3" height="8" rx="1.5" fill="url(#wave)"/>
+    <rect x="18" y="2" width="3" height="16" rx="1.5" fill="url(#wave)"/>
+    <rect x="24" y="7" width="3" height="6" rx="1.5" fill="url(#wave)"/>
+    <rect x="30" y="3" width="3" height="14" rx="1.5" fill="url(#wave)"/>
+    <rect x="36" y="5" width="3" height="10" rx="1.5" fill="url(#wave)"/>
+    <rect x="42" y="1" width="3" height="18" rx="1.5" fill="url(#wave)"/>
+    <rect x="48" y="6" width="3" height="8" rx="1.5" fill="url(#wave)"/>
+    <rect x="54" y="4" width="3" height="12" rx="1.5" fill="url(#wave)"/>
+  </g>
+
+  <!-- Title text -->
+  <text x="118" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="46" font-weight="700" fill="url(#text-grad)" letter-spacing="-1">livescribe</text>
+
+  <!-- Subtitle -->
+  <text x="120" y="100" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#94a3b8" letter-spacing="0.5">Real-time audio transcription powered by Whisper</text>
+
+  <!-- Tech badges -->
+  <g transform="translate(120, 114)">
+    <rect x="0" y="0" width="42" height="20" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="21" y="14" font-family="ui-monospace, monospace" font-size="10" fill="#f97316" text-anchor="middle">Rust</text>
+
+    <rect x="50" y="0" width="76" height="20" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="88" y="14" font-family="ui-monospace, monospace" font-size="10" fill="#22d3ee" text-anchor="middle">whisper.cpp</text>
+
+    <rect x="134" y="0" width="82" height="20" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="175" y="14" font-family="ui-monospace, monospace" font-size="10" fill="#a78bfa" text-anchor="middle">non-blocking</text>
+  </g>
+</svg>

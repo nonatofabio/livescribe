@@ -1,4 +1,21 @@
-# Livescribe
+<p align="center">
+  <img src="assets/logo.svg" alt="Livescribe" width="480"/>
+</p>
+
+<p align="center">
+  <a href="#installation"><strong>Install</strong></a> &middot;
+  <a href="#usage"><strong>Usage</strong></a> &middot;
+  <a href="#available-models"><strong>Models</strong></a> &middot;
+  <a href="#architecture"><strong>Architecture</strong></a>
+</p>
+
+<p align="center">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white"/>
+  <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue?style=flat-square"/>
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-green?style=flat-square"/>
+</p>
+
+---
 
 A fast, cross-platform live audio transcription tool built in Rust. Captures audio from your microphone and transcribes it in real-time using [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 
