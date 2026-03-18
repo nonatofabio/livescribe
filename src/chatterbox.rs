@@ -163,8 +163,13 @@ fn ensure_venv() -> Result<PathBuf> {
     // Step 2: Upgrade pip and setuptools (fresh venvs ship outdated ones)
     if !installed_marker().exists() {
         println!("Upgrading pip and setuptools...");
+        // Pin setuptools<78: newer versions removed pkg_resources.ImpImporter
+        // which chatterbox's pinned numpy<1.26 needs to build from source.
         let status = Command::new(&python)
-            .args(["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+            .args([
+                "-m", "pip", "install", "--upgrade",
+                "pip", "setuptools<78", "wheel",
+            ])
             .status()
             .context("Failed to upgrade pip/setuptools")?;
 
