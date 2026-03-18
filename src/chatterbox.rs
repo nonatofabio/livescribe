@@ -33,7 +33,10 @@ impl std::str::FromStr for ChatterboxModel {
             "turbo" => Ok(Self::Turbo),
             "multilingual" => Ok(Self::Multilingual),
             "original" => Ok(Self::Original),
-            _ => bail!("Unknown chatterbox model: '{}'. Use: turbo, multilingual, original", s),
+            _ => bail!(
+                "Unknown chatterbox model: '{}'. Use: turbo, multilingual, original",
+                s
+            ),
         }
     }
 }
@@ -41,8 +44,113 @@ impl std::str::FromStr for ChatterboxModel {
 /// The Python synthesis script, embedded in the binary at compile time.
 const SYNTH_SCRIPT: &str = include_str!("../scripts/chatterbox_synth.py");
 
-/// Writes the embedded Python script to the cache directory and returns its path.
-/// Re-uses the cached copy if it already exists and matches.
+// ---------------------------------------------------------------------------
+// Managed venv in ~/.cache/livescribe/chatterbox-venv/
+// ---------------------------------------------------------------------------
+
+/// Returns the path to the managed Chatterbox venv.
+fn venv_dir() -> PathBuf {
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("livescribe")
+        .join("chatterbox-venv")
+}
+
+/// Returns the python3 binary inside the managed venv.
+fn venv_python() -> PathBuf {
+    let venv = venv_dir();
+    if cfg!(windows) {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python3")
+    }
+}
+
+/// Marker file that records a successful chatterbox-tts install.
+fn installed_marker() -> PathBuf {
+    venv_dir().join(".chatterbox-installed")
+}
+
+/// Find a usable system python3 (not a global install target — just for creating the venv).
+fn find_system_python() -> Result<String> {
+    for candidate in ["python3", "python"] {
+        if let Ok(output) = Command::new(candidate)
+            .args(["--version"])
+            .output()
+        {
+            if output.status.success() {
+                return Ok(candidate.to_string());
+            }
+        }
+    }
+    bail!(
+        "python3 not found on PATH.\n\
+         Install Python 3.11+:\n  \
+         macOS:  brew install python@3.12\n  \
+         Linux:  sudo apt install python3 python3-venv"
+    )
+}
+
+/// Ensures the managed venv exists with chatterbox-tts installed.
+/// Creates it on first use. This is the only time pip runs.
+fn ensure_venv() -> Result<PathBuf> {
+    let python = venv_python();
+
+    // Fast path: venv already set up
+    if python.exists() && installed_marker().exists() {
+        return Ok(python);
+    }
+
+    let venv = venv_dir();
+    let sys_python = find_system_python()?;
+
+    // Step 1: Create venv
+    if !python.exists() {
+        println!("Creating Chatterbox Python environment at {}...", venv.display());
+        let status = Command::new(&sys_python)
+            .args(["-m", "venv", &venv.to_string_lossy()])
+            .status()
+            .context("Failed to create Python venv")?;
+
+        if !status.success() {
+            bail!(
+                "Failed to create venv. You may need python3-venv:\n  \
+                 sudo apt install python3-venv"
+            );
+        }
+    }
+
+    // Step 2: Install chatterbox-tts into the venv
+    if !installed_marker().exists() {
+        println!("Installing chatterbox-tts (this may take a few minutes on first run)...");
+        let pip = if cfg!(windows) {
+            venv.join("Scripts").join("pip.exe")
+        } else {
+            venv.join("bin").join("pip")
+        };
+
+        let status = Command::new(&pip)
+            .args(["install", "chatterbox-tts"])
+            .status()
+            .context("Failed to install chatterbox-tts")?;
+
+        if !status.success() {
+            bail!(
+                "pip install chatterbox-tts failed.\n\
+                 Try manually: {} -m pip install chatterbox-tts",
+                python.display()
+            );
+        }
+
+        // Write marker so we don't re-install next time
+        std::fs::write(installed_marker(), "ok").ok();
+        println!("Chatterbox TTS installed successfully.");
+    }
+
+    Ok(python)
+}
+
+/// Writes the embedded Python script to the cache directory.
 fn ensure_script() -> Result<PathBuf> {
     let cache_dir = dirs::cache_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -50,29 +158,15 @@ fn ensure_script() -> Result<PathBuf> {
     std::fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
     let script_path = cache_dir.join("chatterbox_synth.py");
-
-    // Write/overwrite — cheap to do, ensures the script stays in sync with the binary
     std::fs::write(&script_path, SYNTH_SCRIPT)
         .context("Failed to write chatterbox_synth.py to cache")?;
 
     Ok(script_path)
 }
 
-/// Check that Python and chatterbox-tts are available.
-pub fn check_python() -> Result<()> {
-    let output = Command::new("python3")
-        .args(["-c", "import chatterbox; print('ok')"])
-        .output();
-
-    match output {
-        Ok(o) if o.status.success() => Ok(()),
-        _ => bail!(
-            "Chatterbox TTS requires Python with chatterbox-tts installed:\n  \
-             pip install chatterbox-tts\n\n\
-             Make sure 'python3' is on your PATH."
-        ),
-    }
-}
+// ---------------------------------------------------------------------------
+// Engine
+// ---------------------------------------------------------------------------
 
 /// Manages a Chatterbox Python subprocess for TTS synthesis.
 pub struct ChatterboxEngine {
@@ -82,28 +176,35 @@ pub struct ChatterboxEngine {
 
 impl ChatterboxEngine {
     /// Spawn the Chatterbox Python sidecar process.
-    pub fn new(
-        model: &ChatterboxModel,
-        voice_ref: Option<&Path>,
-    ) -> Result<Self> {
-        check_python()?;
+    ///
+    /// On first use, this will:
+    /// 1. Create an isolated venv at ~/.cache/livescribe/chatterbox-venv/
+    /// 2. pip install chatterbox-tts into it
+    /// 3. Run the synthesis script using that venv's python
+    ///
+    /// Subsequent runs reuse the venv instantly.
+    pub fn new(model: &ChatterboxModel, voice_ref: Option<&Path>) -> Result<Self> {
+        let python = ensure_venv()?;
         let script = ensure_script()?;
 
-        let mut cmd = Command::new("python3");
+        let mut cmd = Command::new(&python);
         cmd.arg(&script)
             .arg("--model")
             .arg(model.as_str())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit()); // pass stderr through for progress
+            .stderr(Stdio::inherit());
 
         if let Some(ref_path) = voice_ref {
             cmd.arg("--voice").arg(ref_path);
         }
 
-        let mut child = cmd.spawn().context(
-            "Failed to start Chatterbox Python process. Is python3 on your PATH?",
-        )?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!(
+                "Failed to start Chatterbox. Venv python: {}",
+                python.display()
+            )
+        })?;
 
         // Read sample rate header (4 bytes, little-endian u32)
         let stdout = child.stdout.as_mut().unwrap();
@@ -126,7 +227,6 @@ impl ChatterboxEngine {
         writeln!(stdin, "{}", msg).context("Failed to write to Chatterbox stdin")?;
         stdin.flush()?;
 
-        // Read framed response: 4 bytes length + N*4 bytes audio
         let stdout = self.child.stdout.as_mut().unwrap();
         let mut len_buf = [0u8; 4];
         std::io::Read::read_exact(stdout, &mut len_buf)
@@ -141,7 +241,6 @@ impl ChatterboxEngine {
         std::io::Read::read_exact(stdout, &mut audio_buf)
             .context("Failed to read audio data from Chatterbox")?;
 
-        // Convert bytes to f32
         let audio: Vec<f32> = audio_buf
             .chunks_exact(4)
             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
@@ -153,7 +252,6 @@ impl ChatterboxEngine {
 
 impl Drop for ChatterboxEngine {
     fn drop(&mut self) {
-        // Close stdin to signal the Python process to exit
         drop(self.child.stdin.take());
         let _ = self.child.wait();
     }
