@@ -82,9 +82,6 @@ struct SpeakArgs {
     /// Voice: Piper voice name, or path to reference .wav for Chatterbox voice cloning.
     #[arg(short, long, default_value = "en_US-amy-medium")]
     voice: String,
-    /// Chatterbox model variant: turbo, multilingual, or original.
-    #[arg(long, default_value = "turbo")]
-    cb_model: String,
     /// Save audio to WAV file.
     #[arg(short, long)]
     save: Option<PathBuf>,
@@ -276,7 +273,6 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
                 })?
         }
         "chatterbox" => {
-            let cb_model: chatterbox::ChatterboxModel = args.cb_model.parse()?;
             let voice_ref = if args.voice != "en_US-amy-medium"
                 && std::path::Path::new(&args.voice).exists()
             {
@@ -286,15 +282,14 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
             };
 
             println!(
-                "Loading Chatterbox TTS (model: {}{})...",
-                cb_model.as_str(),
+                "Loading Chatterbox TTS{}...",
                 voice_ref
                     .as_ref()
-                    .map(|p| format!(", voice: {}", p.display()))
+                    .map(|p| format!(" (voice: {})", p.display()))
                     .unwrap_or_default()
             );
             let mut engine =
-                chatterbox::ChatterboxEngine::new(&cb_model, voice_ref.as_deref())?;
+                chatterbox::ChatterboxEngine::new(voice_ref.as_deref())?;
             source_rate = engine.sample_rate();
             println!("Engine loaded. Sample rate: {}Hz", source_rate);
 

@@ -7,39 +7,6 @@ use std::sync::Arc;
 use anyhow::{bail, Context, Result};
 use crossbeam_channel::Sender;
 
-/// Chatterbox model variants.
-#[derive(Debug, Clone)]
-pub enum ChatterboxModel {
-    Turbo,
-    Multilingual,
-    Original,
-}
-
-impl ChatterboxModel {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Turbo => "turbo",
-            Self::Multilingual => "multilingual",
-            Self::Original => "original",
-        }
-    }
-}
-
-impl std::str::FromStr for ChatterboxModel {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "turbo" => Ok(Self::Turbo),
-            "multilingual" => Ok(Self::Multilingual),
-            "original" => Ok(Self::Original),
-            _ => bail!(
-                "Unknown chatterbox model: '{}'. Use: turbo, multilingual, original",
-                s
-            ),
-        }
-    }
-}
 
 /// The Python synthesis script, embedded in the binary at compile time.
 const SYNTH_SCRIPT: &str = include_str!("../scripts/chatterbox_synth.py");
@@ -71,20 +38,14 @@ fn installed_marker() -> PathBuf {
     venv_dir().join(".chatterbox-installed")
 }
 
-/// Find a compatible system python (3.11 or 3.12) for the Chatterbox venv.
+/// Find a compatible system python for the Chatterbox venv.
 ///
-/// Chatterbox pins old numpy (<1.26) which doesn't build on Python 3.13+.
-/// We try specific versioned binaries first to avoid the system default
-/// if it's too new.
+/// Chatterbox pins numpy<1.26 which has no binary wheels for Python 3.12+
+/// and cannot build from source on 3.12+ due to setuptools/distutils changes.
+/// Python 3.11 is the only fully compatible version.
 fn find_system_python() -> Result<String> {
-    // Prefer 3.11/3.12 — known compatible with chatterbox-tts
-    let candidates = [
-        "python3.12",
-        "python3.11",
-        "python3.13",
-        "python3",
-        "python",
-    ];
+    // 3.11 is the only version where chatterbox's numpy pin has binary wheels
+    let candidates = ["python3.11", "python3.12", "python3", "python"];
 
     for candidate in candidates {
         if let Ok(output) = Command::new(candidate).args(["--version"]).output() {
@@ -92,30 +53,18 @@ fn find_system_python() -> Result<String> {
                 let version = String::from_utf8_lossy(&output.stdout);
                 let version = version.trim();
 
-                // Parse major.minor
                 if let Some(ver_str) = version.strip_prefix("Python ") {
                     let parts: Vec<&str> = ver_str.split('.').collect();
                     if let (Some(major), Some(minor)) = (
                         parts.first().and_then(|s| s.parse::<u32>().ok()),
                         parts.get(1).and_then(|s| s.parse::<u32>().ok()),
                     ) {
-                        if major == 3 && (11..=12).contains(&minor) {
+                        if major == 3 && minor == 11 {
                             eprintln!("Using {} for Chatterbox venv", version);
                             return Ok(candidate.to_string());
                         }
-                        // Skip 3.14+ — incompatible with chatterbox's numpy pin
-                        if major == 3 && minor >= 14 {
-                            continue;
-                        }
-                        // 3.13 — might work, use as fallback
-                        if major == 3 && minor == 13 {
-                            eprintln!(
-                                "Warning: {} may have issues with chatterbox-tts. \
-                                 Python 3.11 or 3.12 recommended.",
-                                version
-                            );
-                            return Ok(candidate.to_string());
-                        }
+                        // Skip anything else — 3.12+ has no numpy<1.26 wheels
+                        continue;
                     }
                 }
             }
@@ -123,11 +72,10 @@ fn find_system_python() -> Result<String> {
     }
 
     bail!(
-        "No compatible Python found for Chatterbox (needs 3.11 or 3.12).\n\
-         Your system Python 3.14 is too new for chatterbox-tts.\n\n\
-         Install a compatible version:\n  \
-         macOS:  brew install python@3.12\n  \
-         Linux:  sudo apt install python3.12 python3.12-venv"
+        "Python 3.11 is required for Chatterbox TTS.\n\n\
+         Install it:\n  \
+         macOS:  brew install python@3.11\n  \
+         Linux:  sudo apt install python3.11 python3.11-venv"
     )
 }
 
@@ -162,20 +110,10 @@ fn ensure_venv() -> Result<PathBuf> {
 
     // Step 2: Upgrade pip and setuptools (fresh venvs ship outdated ones)
     if !installed_marker().exists() {
-        println!("Upgrading pip and setuptools...");
-        // Pin setuptools<78: newer versions removed pkg_resources.ImpImporter
-        // which chatterbox's pinned numpy<1.26 needs to build from source.
-        let status = Command::new(&python)
-            .args([
-                "-m", "pip", "install", "--upgrade",
-                "pip", "setuptools<78", "wheel",
-            ])
-            .status()
-            .context("Failed to upgrade pip/setuptools")?;
-
-        if !status.success() {
-            eprintln!("Warning: pip upgrade failed, continuing anyway...");
-        }
+        println!("Upgrading pip...");
+        let _ = Command::new(&python)
+            .args(["-m", "pip", "install", "--upgrade", "pip"])
+            .status();
 
         // Step 3: Install chatterbox-tts
         println!("Installing chatterbox-tts (this may take a few minutes on first run)...");
@@ -192,6 +130,13 @@ fn ensure_venv() -> Result<PathBuf> {
                 python.display()
             );
         }
+
+        // Step 4: Ensure setuptools<74 is present (provides pkg_resources
+        // which resemble-perth needs at runtime). Modern setuptools 78+
+        // removed pkg_resources entirely.
+        let _ = Command::new(&python)
+            .args(["-m", "pip", "install", "setuptools<74"])
+            .status();
 
         // Write marker so we don't re-install next time
         std::fs::write(installed_marker(), "ok").ok();
@@ -234,14 +179,12 @@ impl ChatterboxEngine {
     /// 3. Run the synthesis script using that venv's python
     ///
     /// Subsequent runs reuse the venv instantly.
-    pub fn new(model: &ChatterboxModel, voice_ref: Option<&Path>) -> Result<Self> {
+    pub fn new(voice_ref: Option<&Path>) -> Result<Self> {
         let python = ensure_venv()?;
         let script = ensure_script()?;
 
         let mut cmd = Command::new(&python);
         cmd.arg(&script)
-            .arg("--model")
-            .arg(model.as_str())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
