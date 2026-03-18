@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="#installation"><strong>Install</strong></a> &middot;
-  <a href="#usage"><strong>Usage</strong></a> &middot;
-  <a href="#available-models"><strong>Models</strong></a> &middot;
+  <a href="#listen-speech-to-text"><strong>Listen (STT)</strong></a> &middot;
+  <a href="#speak-text-to-speech"><strong>Speak (TTS)</strong></a> &middot;
   <a href="#architecture"><strong>Architecture</strong></a>
 </p>
 
@@ -17,93 +17,79 @@
 
 ---
 
-A fast, cross-platform live audio transcription tool built in Rust. Captures audio from your microphone and transcribes it in real-time using [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+A fast, cross-platform audio toolkit built in Rust — **live transcription** (STT) using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and **document reading** (TTS) using [Piper](https://github.com/rhasspy/piper).
 
 ## Features
 
-- **Non-blocking pipeline**: Recording never stops while transcription runs — audio capture and inference happen on separate threads
-- **Overlapping chunks**: Consecutive audio chunks overlap (default 2s) to avoid cutting words at boundaries, with automatic deduplication
-- **High-quality default model**: Uses `distil-large-v3` — near large-v3 accuracy at ~6x speed
-- **Auto model download**: Models are downloaded from HuggingFace on first run and cached locally
+- **Listen**: Real-time speech-to-text with non-blocking pipeline, overlapping chunks, and automatic deduplication
+- **Speak**: Read documents aloud (.txt, .md, .pdf) with high-quality neural TTS voices
+- **Auto model download**: Whisper and Piper models downloaded from HuggingFace on first run
 - **Cross-platform**: macOS (CoreAudio), Linux (ALSA), Windows (WASAPI) via cpal
-- **GPU acceleration**: Optional Metal (macOS), CUDA (NVIDIA), and CoreML support
+- **GPU acceleration**: Optional Metal (macOS), CUDA (NVIDIA), and CoreML support for transcription
 
 ## Installation
 
 ### Prerequisites
 
-- Rust toolchain (install via [rustup](https://rustup.rs/))
-- A C/C++ compiler (Xcode Command Line Tools on macOS, gcc on Linux, MSVC on Windows)
+- Rust toolchain ([rustup](https://rustup.rs/))
+- C/C++ compiler (Xcode CLI Tools on macOS, gcc on Linux, MSVC on Windows)
+- `espeak-ng` for TTS phonemization:
+  ```bash
+  # macOS
+  brew install espeak-ng
+  # Debian/Ubuntu
+  sudo apt install espeak-ng
+  ```
 - On Linux: `libasound2-dev` (Debian/Ubuntu) or `alsa-lib-devel` (Fedora)
 
 ### Build
 
 ```bash
-# Standard CPU build
 cargo build --release
 
-# macOS with Metal GPU acceleration
+# macOS with Metal GPU acceleration (for listen)
 cargo build --release --features metal
-
-# NVIDIA GPU acceleration
-cargo build --release --features cuda
 ```
 
-The binary will be at `target/release/livescribe`.
-
-## Usage
-
-### Basic Usage
-
+Install to PATH:
 ```bash
-# Start transcribing with defaults (distil-large-v3 model, 8s chunks, 2s overlap)
-cargo run --release
+cargo install --path .
 ```
 
-On first run, the model (~1.5 GB) will be downloaded automatically and cached at `~/.cache/livescribe/models/`.
+---
 
-### List Audio Devices
+## Listen (Speech-to-Text)
 
-```bash
-cargo run --release -- --list-devices
-```
-
-### Options
+Real-time microphone transcription using Whisper.
 
 ```bash
-livescribe [OPTIONS]
+# Start transcribing (auto-downloads distil-large-v3 on first run, ~1.5 GB)
+livescribe listen
 
-Options:
-  -o, --output <FILE>           Output file [default: transcription.txt]
-  -m, --model <NAME|PATH>       Whisper model name or path [default: distil-large-v3]
-  -d, --device <INDEX>          Audio input device index
-  -c, --chunk-duration <SECS>   Audio chunk size in seconds [default: 8]
-      --overlap <SECS>          Overlap between chunks in seconds [default: 2]
-  -l, --language <CODE>         Language code [default: en]
-  -t, --threads <N>             Whisper inference threads
-      --list-devices            List audio devices and exit
-  -h, --help                    Print help
-```
-
-### Examples
-
-```bash
-# Transcribe a meeting with medium model
-livescribe --model medium --output meeting.txt
-
-# Quick voice notes with faster model
-livescribe --model small --chunk-duration 5 --output notes.txt
+# Use a specific model and output file
+livescribe listen --model small --output meeting.txt
 
 # Use a specific microphone
-livescribe --device 2
+livescribe listen --device 2
 
-# Use a custom model file
-livescribe --model /path/to/custom-model.bin
+# List available input devices
+livescribe listen --list-devices
 ```
 
-## Available Models
+### Listen Options
 
-Models are auto-downloaded on first use. Choose based on accuracy vs. speed:
+```
+  -o, --output <FILE>           Output file [default: transcription.txt]
+  -m, --model <NAME|PATH>       Whisper model [default: distil-large-v3]
+  -d, --device <INDEX>          Audio input device index
+  -c, --chunk-duration <SECS>   Chunk size [default: 8]
+      --overlap <SECS>          Overlap between chunks [default: 2]
+  -l, --language <CODE>         Language [default: en]
+  -t, --threads <N>             Whisper inference threads
+      --list-devices            List input devices and exit
+```
+
+### Whisper Models
 
 | Model | Size | Speed | Accuracy |
 |-------|------|-------|----------|
@@ -114,43 +100,89 @@ Models are auto-downloaded on first use. Choose based on accuracy vs. speed:
 | `large-v3` | 3.1 GB | Slowest | Best |
 | **`distil-large-v3`** | **1.5 GB** | **Fast** | **Near-best** |
 
-**Recommendation**: The default `distil-large-v3` offers the best accuracy-to-speed ratio. Use `small` for lower resource usage.
+---
+
+## Speak (Text-to-Speech)
+
+Read documents aloud using Piper neural TTS.
+
+```bash
+# Read a text file (auto-downloads voice model on first run, ~63 MB)
+livescribe speak document.txt
+
+# Read a Markdown file with a different voice
+livescribe speak notes.md --voice en_US-lessac-medium
+
+# Read a PDF and save to WAV
+livescribe speak paper.pdf --save output.wav
+
+# Save without playing
+livescribe speak doc.txt --save output.wav --no-play
+
+# Adjust speech speed (2x faster)
+livescribe speak doc.txt --speed 2.0
+
+# List available voices
+livescribe speak --list-voices
+
+# List available output devices
+livescribe speak --list-devices
+```
+
+### Speak Options
+
+```
+  <FILE>                    Document to read (.txt, .md, .pdf)
+  -v, --voice <NAME>        Piper voice [default: en_US-amy-medium]
+  -s, --save <PATH>         Save audio to WAV file
+      --speed <FLOAT>       Speech speed multiplier [default: 1.0]
+  -d, --device <INDEX>      Audio output device index
+      --list-voices         List available voices
+      --list-devices        List output devices
+      --no-play             Don't play audio (use with --save)
+```
+
+### Piper Voices
+
+| Voice | Language | Gender | Quality |
+|-------|----------|--------|---------|
+| `en_US-amy-medium` | US English | Female | Medium |
+| `en_US-lessac-medium` | US English | Male | Medium |
+| `en_US-lessac-high` | US English | Male | High |
+| `en_US-ryan-medium` | US English | Male | Medium |
+| `en_US-joe-medium` | US English | Male | Medium |
+| `en_GB-alba-medium` | British English | Female | Medium |
+| `en_GB-jenny_dioco-medium` | British English | Female | Medium |
+
+### Supported Document Formats
+
+- **`.txt`** — Plain text, read as-is
+- **`.md`** — Markdown with formatting stripped (code blocks skipped)
+- **`.pdf`** — PDF text extraction (text-based PDFs only)
+
+---
 
 ## Architecture
 
-Livescribe uses a 3-thread producer-consumer pipeline:
-
+### Listen Pipeline (3 threads)
 ```
 [Audio Thread] → [Transcription Thread] → [Output / Main Thread]
     cpal            whisper.cpp               file + stdout
  (never stops)     (CPU-bound)              (dedup + write)
 ```
 
-1. **Audio thread**: Continuously captures via cpal, assembles overlapping chunks, sends them through a bounded channel
-2. **Transcription thread**: Runs whisper.cpp inference on each chunk
-3. **Main thread**: Receives results, deduplicates overlap, writes timestamped output
-
-Recording never pauses — if transcription falls behind, the oldest pending chunk is dropped rather than blocking audio capture.
-
-## Output Format
-
+### Speak Pipeline (2 threads)
 ```
-============================================================
-Transcription started: 2024-01-15 14:30:00
-============================================================
-
-[14:30:05] Hello, this is a test of the transcription system.
-[14:30:12] It captures audio in chunks and transcribes them.
-[14:30:20] The output is saved to a text file with timestamps.
-
-============================================================
-Transcription ended: 2024-01-15 14:32:45
-============================================================
+[Synthesis Thread] → [Playback / Main Thread]
+  espeak-ng + Piper       cpal output stream
+   (CPU-bound)           (resample + play)
 ```
+
+Both pipelines use bounded crossbeam channels with backpressure. Recording never pauses during transcription. Ctrl+C triggers graceful shutdown with no data loss.
 
 ## Capture Internal Audio (macOS)
 
-To transcribe system audio (video calls, browser audio), install [BlackHole](https://github.com/ExistentialAudio/BlackHole):
+To transcribe system audio (video calls, browser), install [BlackHole](https://github.com/ExistentialAudio/BlackHole):
 
 ```bash
 brew install blackhole-2ch
@@ -160,23 +192,27 @@ brew install blackhole-2ch
 2. Click **+** → Create **Multi-Output Device**
 3. Check both **BlackHole 2ch** and your **Built-in Output**
 4. Set the Multi-Output Device as system output in **System Settings > Sound**
-5. Run livescribe and select BlackHole as the input device
+5. Run `livescribe listen` and select BlackHole as the input device
 
 ## Troubleshooting
 
-### "No default input device found"
-- Check microphone permissions in System Settings > Privacy & Security > Microphone
+### "espeak-ng is not installed"
+```bash
+brew install espeak-ng     # macOS
+sudo apt install espeak-ng # Linux
+```
+
+### "No default input/output device found"
+- Check microphone/speaker permissions in System Settings > Privacy & Security
 - Use `--list-devices` to find the correct device index
 
 ### High latency / "Transcription falling behind"
 - Use a faster model: `--model small` or `--model base`
-- Increase chunk duration: `--chunk-duration 10`
-- Enable GPU acceleration: build with `--features metal` (macOS) or `--features cuda`
+- Enable GPU acceleration: build with `--features metal` (macOS)
 
-### Build errors with whisper-rs
-- Ensure you have a C/C++ compiler installed
-- On macOS: `xcode-select --install`
-- On Linux: `sudo apt install build-essential` (Debian/Ubuntu)
+### Build errors
+- Ensure C/C++ compiler: `xcode-select --install` (macOS) or `sudo apt install build-essential` (Linux)
+- cmake is required for whisper-rs: `brew install cmake` (macOS)
 
 ## License
 

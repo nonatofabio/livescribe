@@ -1,20 +1,55 @@
 [package]
 name = "livescribe"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2021"
-description = "Live audio transcription using Whisper"
+description = "Live audio transcription and text-to-speech using Whisper and Piper"
 
 [dependencies]
+# STT - Whisper inference
 whisper-rs = "0.14"
+
+# Audio I/O
 cpal = "0.15"
+
+# CLI
 clap = { version = "4", features = ["derive"] }
+
+# Concurrency
 crossbeam-channel = "0.5"
+
+# HTTP downloads
 reqwest = { version = "0.12", features = ["blocking"] }
 indicatif = "0.17"
+
+# System paths
 dirs = "6"
+
+# Signal handling
 ctrlc = "3.4"
+
+# Timestamps
 chrono = "0.4"
+
+# Error handling
 anyhow = "1"
+
+# TTS - ONNX Runtime for Piper inference
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+ndarray = "0.16"
+
+# WAV file output
+hound = "3.5"
+
+# Document parsing
+pulldown-cmark = "0.12"
+pdf-extract = "0.7"
+
+# Piper config parsing
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Text processing
+regex = "1"
 
 [features]
 default = []
