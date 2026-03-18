@@ -71,23 +71,63 @@ fn installed_marker() -> PathBuf {
     venv_dir().join(".chatterbox-installed")
 }
 
-/// Find a usable system python3 (not a global install target — just for creating the venv).
+/// Find a compatible system python (3.11 or 3.12) for the Chatterbox venv.
+///
+/// Chatterbox pins old numpy (<1.26) which doesn't build on Python 3.13+.
+/// We try specific versioned binaries first to avoid the system default
+/// if it's too new.
 fn find_system_python() -> Result<String> {
-    for candidate in ["python3", "python"] {
-        if let Ok(output) = Command::new(candidate)
-            .args(["--version"])
-            .output()
-        {
+    // Prefer 3.11/3.12 — known compatible with chatterbox-tts
+    let candidates = [
+        "python3.12",
+        "python3.11",
+        "python3.13",
+        "python3",
+        "python",
+    ];
+
+    for candidate in candidates {
+        if let Ok(output) = Command::new(candidate).args(["--version"]).output() {
             if output.status.success() {
-                return Ok(candidate.to_string());
+                let version = String::from_utf8_lossy(&output.stdout);
+                let version = version.trim();
+
+                // Parse major.minor
+                if let Some(ver_str) = version.strip_prefix("Python ") {
+                    let parts: Vec<&str> = ver_str.split('.').collect();
+                    if let (Some(major), Some(minor)) = (
+                        parts.first().and_then(|s| s.parse::<u32>().ok()),
+                        parts.get(1).and_then(|s| s.parse::<u32>().ok()),
+                    ) {
+                        if major == 3 && (11..=12).contains(&minor) {
+                            eprintln!("Using {} for Chatterbox venv", version);
+                            return Ok(candidate.to_string());
+                        }
+                        // Skip 3.14+ — incompatible with chatterbox's numpy pin
+                        if major == 3 && minor >= 14 {
+                            continue;
+                        }
+                        // 3.13 — might work, use as fallback
+                        if major == 3 && minor == 13 {
+                            eprintln!(
+                                "Warning: {} may have issues with chatterbox-tts. \
+                                 Python 3.11 or 3.12 recommended.",
+                                version
+                            );
+                            return Ok(candidate.to_string());
+                        }
+                    }
+                }
             }
         }
     }
+
     bail!(
-        "python3 not found on PATH.\n\
-         Install Python 3.11+:\n  \
+        "No compatible Python found for Chatterbox (needs 3.11 or 3.12).\n\
+         Your system Python 3.14 is too new for chatterbox-tts.\n\n\
+         Install a compatible version:\n  \
          macOS:  brew install python@3.12\n  \
-         Linux:  sudo apt install python3 python3-venv"
+         Linux:  sudo apt install python3.12 python3.12-venv"
     )
 }
 
