@@ -38,35 +38,24 @@ impl std::str::FromStr for ChatterboxModel {
     }
 }
 
-/// Locate the bundled Python synthesis script.
-fn find_script() -> Result<PathBuf> {
-    // Check next to the binary
-    let exe = std::env::current_exe().context("Failed to get executable path")?;
-    let exe_dir = exe.parent().unwrap_or(Path::new("."));
+/// The Python synthesis script, embedded in the binary at compile time.
+const SYNTH_SCRIPT: &str = include_str!("../scripts/chatterbox_synth.py");
 
-    // Try several locations
-    let candidates = [
-        exe_dir.join("scripts/chatterbox_synth.py"),
-        exe_dir.join("../scripts/chatterbox_synth.py"),
-        exe_dir.join("../../scripts/chatterbox_synth.py"),
-        PathBuf::from("scripts/chatterbox_synth.py"),
-    ];
+/// Writes the embedded Python script to the cache directory and returns its path.
+/// Re-uses the cached copy if it already exists and matches.
+fn ensure_script() -> Result<PathBuf> {
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("livescribe");
+    std::fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
-    for path in &candidates {
-        if path.exists() {
-            return Ok(path.clone());
-        }
-    }
+    let script_path = cache_dir.join("chatterbox_synth.py");
 
-    bail!(
-        "Cannot find chatterbox_synth.py. Expected in scripts/ directory.\n\
-         Searched: {}",
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
+    // Write/overwrite — cheap to do, ensures the script stays in sync with the binary
+    std::fs::write(&script_path, SYNTH_SCRIPT)
+        .context("Failed to write chatterbox_synth.py to cache")?;
+
+    Ok(script_path)
 }
 
 /// Check that Python and chatterbox-tts are available.
@@ -98,7 +87,7 @@ impl ChatterboxEngine {
         voice_ref: Option<&Path>,
     ) -> Result<Self> {
         check_python()?;
-        let script = find_script()?;
+        let script = ensure_script()?;
 
         let mut cmd = Command::new("python3");
         cmd.arg(&script)
