@@ -1,4 +1,5 @@
 mod audio;
+mod chatterbox;
 mod dedup;
 mod document;
 mod model;
@@ -75,13 +76,19 @@ struct ListenArgs {
 struct SpeakArgs {
     /// Document file to read aloud (.txt, .md, .pdf).
     file: PathBuf,
-    /// Piper voice name.
+    /// TTS engine: "piper" (fast, local) or "chatterbox" (high quality, needs Python).
+    #[arg(short, long, default_value = "piper")]
+    engine: String,
+    /// Voice: Piper voice name, or path to reference .wav for Chatterbox voice cloning.
     #[arg(short, long, default_value = "en_US-amy-medium")]
     voice: String,
+    /// Chatterbox model variant: turbo, multilingual, or original.
+    #[arg(long, default_value = "turbo")]
+    cb_model: String,
     /// Save audio to WAV file.
     #[arg(short, long)]
     save: Option<PathBuf>,
-    /// Speech speed multiplier (0.5 = half speed, 2.0 = double).
+    /// Speech speed multiplier (0.5 = half speed, 2.0 = double). Piper only.
     #[arg(long, default_value_t = 1.0)]
     speed: f32,
     /// Audio output device index.
@@ -230,19 +237,7 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
     let sentences = tts::split_sentences(&text);
     println!("Found {} sentences to speak.", sentences.len());
 
-    // 2. Ensure voice model is available
-    let (onnx_path, mut config) = voice::ensure_voice(&args.voice)?;
-
-    // Apply speed modifier
-    config.inference.length_scale /= args.speed;
-
-    // 3. Load TTS engine
-    println!("Loading TTS engine (voice: {})...", args.voice);
-    let mut engine = tts::TtsEngine::new(&onnx_path, config)?;
-    let source_rate = engine.sample_rate();
-    println!("Engine loaded. Sample rate: {}Hz", source_rate);
-
-    // 4. Shutdown flag
+    // 2. Shutdown flag
     let shutdown = Arc::new(AtomicBool::new(false));
     {
         let s = shutdown.clone();
@@ -252,23 +247,79 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
         })?;
     }
 
-    // 5. Channel: synthesis -> playback/save
+    // 3. Channel: synthesis -> playback/save
     let (audio_tx, audio_rx) = crossbeam_channel::bounded::<Vec<f32>>(4);
 
-    // 6. Spawn synthesis thread
-    let shutdown_s = shutdown.clone();
+    // 4. Route to the right engine
     let total = sentences.len();
-    let synth_handle = std::thread::Builder::new()
-        .name("tts-synthesis".into())
-        .spawn(move || {
-            if let Err(e) =
-                tts::synthesis_loop(&mut engine, sentences, total, audio_tx, shutdown_s)
-            {
-                eprintln!("Synthesis error: {}", e);
-            }
-        })?;
+    let source_rate: u32;
 
-    // 7. Playback and/or save
+    let synth_handle = match args.engine.as_str() {
+        "piper" => {
+            let (onnx_path, mut config) = voice::ensure_voice(&args.voice)?;
+            config.inference.length_scale /= args.speed;
+
+            println!("Loading Piper TTS (voice: {})...", args.voice);
+            let mut engine = tts::TtsEngine::new(&onnx_path, config)?;
+            source_rate = engine.sample_rate();
+            println!("Engine loaded. Sample rate: {}Hz", source_rate);
+
+            let shutdown_s = shutdown.clone();
+            std::thread::Builder::new()
+                .name("tts-synthesis".into())
+                .spawn(move || {
+                    if let Err(e) =
+                        tts::synthesis_loop(&mut engine, sentences, total, audio_tx, shutdown_s)
+                    {
+                        eprintln!("Synthesis error: {}", e);
+                    }
+                })?
+        }
+        "chatterbox" => {
+            let cb_model: chatterbox::ChatterboxModel = args.cb_model.parse()?;
+            let voice_ref = if args.voice != "en_US-amy-medium"
+                && std::path::Path::new(&args.voice).exists()
+            {
+                Some(PathBuf::from(&args.voice))
+            } else {
+                None
+            };
+
+            println!(
+                "Loading Chatterbox TTS (model: {}{})...",
+                cb_model.as_str(),
+                voice_ref
+                    .as_ref()
+                    .map(|p| format!(", voice: {}", p.display()))
+                    .unwrap_or_default()
+            );
+            let mut engine =
+                chatterbox::ChatterboxEngine::new(&cb_model, voice_ref.as_deref())?;
+            source_rate = engine.sample_rate();
+            println!("Engine loaded. Sample rate: {}Hz", source_rate);
+
+            let shutdown_s = shutdown.clone();
+            std::thread::Builder::new()
+                .name("chatterbox-synthesis".into())
+                .spawn(move || {
+                    if let Err(e) = chatterbox::synthesis_loop(
+                        &mut engine,
+                        sentences,
+                        total,
+                        audio_tx,
+                        shutdown_s,
+                    ) {
+                        eprintln!("Synthesis error: {}", e);
+                    }
+                })?
+        }
+        other => bail!(
+            "Unknown engine '{}'. Available: piper, chatterbox",
+            other
+        ),
+    };
+
+    // 5. Playback and/or save
     let want_play = !args.no_play;
     let want_save = args.save.is_some();
 
@@ -279,7 +330,6 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
 
         let (play_tx, play_rx) = crossbeam_channel::bounded::<Vec<f32>>(4);
 
-        // Tee thread: collect all audio for WAV, forward to playback
         let fwd_handle = std::thread::Builder::new()
             .name("audio-tee".into())
             .spawn(move || -> Vec<f32> {
@@ -306,7 +356,6 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
         let shutdown_p = shutdown.clone();
         audio::playback_loop(device, audio_rx, source_rate, shutdown_p)?;
     } else {
-        // --no-play --save
         let save_path = args.save.unwrap();
         let mut all_samples: Vec<f32> = Vec::new();
         for chunk in audio_rx.iter() {
