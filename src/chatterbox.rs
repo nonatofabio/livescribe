@@ -120,17 +120,23 @@ fn ensure_venv() -> Result<PathBuf> {
         }
     }
 
-    // Step 2: Install chatterbox-tts into the venv
+    // Step 2: Upgrade pip and setuptools (fresh venvs ship outdated ones)
     if !installed_marker().exists() {
-        println!("Installing chatterbox-tts (this may take a few minutes on first run)...");
-        let pip = if cfg!(windows) {
-            venv.join("Scripts").join("pip.exe")
-        } else {
-            venv.join("bin").join("pip")
-        };
+        println!("Upgrading pip and setuptools...");
+        let status = Command::new(&python)
+            .args(["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+            .status()
+            .context("Failed to upgrade pip/setuptools")?;
 
-        let status = Command::new(&pip)
-            .args(["install", "chatterbox-tts"])
+        if !status.success() {
+            eprintln!("Warning: pip upgrade failed, continuing anyway...");
+        }
+
+        // Step 3: Install chatterbox-tts
+        println!("Installing chatterbox-tts (this may take a few minutes on first run)...");
+
+        let status = Command::new(&python)
+            .args(["-m", "pip", "install", "chatterbox-tts"])
             .status()
             .context("Failed to install chatterbox-tts")?;
 
