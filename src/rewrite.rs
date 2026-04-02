@@ -1,10 +1,15 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 
 const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-opus-4-6-v1";
+
+/// Max characters per chunk sent to the LLM. Claude supports ~200k tokens
+/// but very long inputs are slow. 15k chars (~4k tokens) keeps responses fast.
+const CHUNK_MAX_CHARS: usize = 15_000;
 
 const SYSTEM_PROMPT: &str = r##"You are an expert at adapting written documents for natural text-to-speech narration.
 
@@ -32,26 +37,20 @@ Rules:
 10. Output only the rewritten text. No preamble, no commentary, no markdown formatting.
 "##;
 
-/// The writing animation text that scrolls under the pen.
 const WRITING_TEXT: &str = "Rewriting for natural speech narration using AI ";
 
-/// Runs a writing animation on stderr while `alive` is true.
-/// Shows text growing character by character with a pen at the end,
-/// then scrolling left once it hits max width.
 fn writing_animation(alive: Arc<AtomicBool>) {
-    let pen = '\u{270D}'; // ✍
+    let pen = '\u{270D}';
     let max_width: usize = 48;
     let chars: Vec<char> = WRITING_TEXT.chars().collect();
     let mut pos: usize = 0;
 
     while alive.load(Ordering::SeqCst) {
         let display = if pos < max_width {
-            // Growing phase: text appears character by character
             let end = pos.min(chars.len());
             let text: String = chars[..end].iter().collect();
             format!("{}{}", text, pen)
         } else {
-            // Scrolling phase: text slides left, pen stays at right edge
             let scroll = pos - max_width;
             let start = scroll % chars.len();
             let text: String = (0..max_width)
@@ -67,44 +66,127 @@ fn writing_animation(alive: Arc<AtomicBool>) {
         std::thread::sleep(std::time::Duration::from_millis(80));
     }
 
-    // Clear the animation line
     eprint!("\r\x1b[K");
     let _ = std::io::stderr().flush();
 }
 
+/// Split text into chunks at paragraph boundaries, respecting max size.
+fn chunk_text(text: &str) -> Vec<String> {
+    if text.len() <= CHUNK_MAX_CHARS {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for paragraph in text.split("\n\n") {
+        if !current.is_empty() && current.len() + paragraph.len() + 2 > CHUNK_MAX_CHARS {
+            chunks.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(paragraph);
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
+}
+
 /// Rewrite document text for natural TTS narration using Claude via Bedrock.
 ///
-/// Shows a writing animation while the API call is in-flight.
-/// Uses the Converse API with the specified model. Defaults to Claude Opus 4.6.
-/// Requires AWS credentials in the environment (AWS_PROFILE, env vars, or IAM role).
-pub fn rewrite_for_speech(text: &str, model_id: Option<&str>) -> Result<String> {
+/// Large documents are split into chunks and processed sequentially.
+/// Shows a writing animation unless verbose mode prints debug logs instead.
+pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> Result<String> {
     let model = model_id.unwrap_or(DEFAULT_MODEL_ID);
+    let chunks = chunk_text(text);
+    let total_chunks = chunks.len();
 
-    // Start the writing animation
-    let alive = Arc::new(AtomicBool::new(true));
-    let alive_clone = alive.clone();
-    let anim_handle = std::thread::Builder::new()
-        .name("rewrite-anim".into())
-        .spawn(move || writing_animation(alive_clone))?;
+    if verbose {
+        eprintln!(
+            "[rewrite] Input: {} chars, split into {} chunk(s), model: {}",
+            text.len(),
+            total_chunks,
+            model
+        );
+    }
 
-    let result = do_rewrite(text, model);
+    // Only show animation in non-verbose mode
+    let alive = Arc::new(AtomicBool::new(!verbose));
+    let anim_handle = if !verbose {
+        let alive_clone = alive.clone();
+        Some(
+            std::thread::Builder::new()
+                .name("rewrite-anim".into())
+                .spawn(move || writing_animation(alive_clone))?,
+        )
+    } else {
+        None
+    };
+
+    let mut all_results = Vec::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        if verbose {
+            eprintln!(
+                "[rewrite] Chunk {}/{}: {} chars, sending to Bedrock...",
+                i + 1,
+                total_chunks,
+                chunk.len()
+            );
+        }
+
+        let start = Instant::now();
+        let result = do_rewrite(chunk, model, verbose)?;
+        let elapsed = start.elapsed();
+
+        if verbose {
+            eprintln!(
+                "[rewrite] Chunk {}/{}: got {} chars back in {:.1}s",
+                i + 1,
+                total_chunks,
+                result.len(),
+                elapsed.as_secs_f64()
+            );
+        }
+
+        all_results.push(result);
+    }
 
     // Stop animation
     alive.store(false, Ordering::SeqCst);
-    let _ = anim_handle.join();
+    if let Some(handle) = anim_handle {
+        let _ = handle.join();
+    }
 
-    result
+    Ok(all_results.join("\n\n[pause]\n\n"))
 }
 
-fn do_rewrite(text: &str, model: &str) -> Result<String> {
+fn do_rewrite(text: &str, model: &str, verbose: bool) -> Result<String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("Failed to create async runtime")?;
 
     rt.block_on(async {
+        if verbose {
+            eprintln!("[rewrite] Loading AWS config...");
+        }
+
         let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+
+        if verbose {
+            eprintln!("[rewrite] AWS region: {:?}", config.region());
+        }
+
         let client = aws_sdk_bedrockruntime::Client::new(&config);
+
+        if verbose {
+            eprintln!("[rewrite] Calling converse API...");
+        }
 
         let response = client
             .converse()
@@ -126,6 +208,20 @@ fn do_rewrite(text: &str, model: &str) -> Result<String> {
             .send()
             .await
             .context("Bedrock API call failed. Check your AWS credentials and region.")?;
+
+        if verbose {
+            if let Some(usage) = response.usage() {
+                eprintln!(
+                    "[rewrite] Token usage: input={}, output={}",
+                    usage.input_tokens(),
+                    usage.output_tokens()
+                );
+            }
+            eprintln!(
+                "[rewrite] Stop reason: {:?}",
+                response.stop_reason()
+            );
+        }
 
         let output = response
             .output()

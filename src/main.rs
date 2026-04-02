@@ -109,6 +109,9 @@ struct SpeakArgs {
     /// LLM model ID for rewriting (Bedrock model ID).
     #[arg(long, default_value = "us.anthropic.claude-opus-4-6-v1")]
     rewrite_model: String,
+    /// Show verbose debug output (API calls, chunk sizes, timing).
+    #[arg(long)]
+    verbose: bool,
 }
 
 fn main() -> Result<()> {
@@ -243,7 +246,7 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
     // 1b. Optional LLM rewrite for natural narration
     if args.rewrite {
         println!("Rewriting for natural speech (model: {})...", args.rewrite_model);
-        text = rewrite::rewrite_for_speech(&text, Some(&args.rewrite_model))?;
+        text = rewrite::rewrite_for_speech(&text, Some(&args.rewrite_model), args.verbose)?;
         println!("Rewrite complete ({} chars).", text.len());
     }
 
