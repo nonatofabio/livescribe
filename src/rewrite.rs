@@ -127,6 +127,23 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         None
     };
 
+    // Create the Bedrock client once, reuse across chunks
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Failed to create async runtime")?;
+
+    let client = rt.block_on(async {
+        if verbose {
+            eprintln!("[rewrite] Loading AWS config...");
+        }
+        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+        if verbose {
+            eprintln!("[rewrite] AWS region: {:?}", config.region());
+        }
+        aws_sdk_bedrockruntime::Client::new(&config)
+    });
+
     let mut all_results = Vec::new();
 
     for (i, chunk) in chunks.iter().enumerate() {
@@ -140,7 +157,7 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         }
 
         let start = Instant::now();
-        let result = do_rewrite(chunk, model, verbose)?;
+        let result = do_rewrite(&rt, &client, chunk, model, verbose)?;
         let elapsed = start.elapsed();
 
         if verbose {
@@ -165,25 +182,14 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
     Ok(all_results.join("\n\n[pause]\n\n"))
 }
 
-fn do_rewrite(text: &str, model: &str, verbose: bool) -> Result<String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("Failed to create async runtime")?;
-
+fn do_rewrite(
+    rt: &tokio::runtime::Runtime,
+    client: &aws_sdk_bedrockruntime::Client,
+    text: &str,
+    model: &str,
+    verbose: bool,
+) -> Result<String> {
     rt.block_on(async {
-        if verbose {
-            eprintln!("[rewrite] Loading AWS config...");
-        }
-
-        let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
-
-        if verbose {
-            eprintln!("[rewrite] AWS region: {:?}", config.region());
-        }
-
-        let client = aws_sdk_bedrockruntime::Client::new(&config);
-
         if verbose {
             eprintln!("[rewrite] Calling converse API...");
         }
@@ -217,10 +223,7 @@ fn do_rewrite(text: &str, model: &str, verbose: bool) -> Result<String> {
                     usage.output_tokens()
                 );
             }
-            eprintln!(
-                "[rewrite] Stop reason: {:?}",
-                response.stop_reason()
-            );
+            eprintln!("[rewrite] Stop reason: {:?}", response.stop_reason());
         }
 
         let output = response
