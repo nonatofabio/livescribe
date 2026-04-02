@@ -294,6 +294,11 @@ pub fn synthesis_loop(
                         if audio_tx.send(audio).is_err() {
                             break;
                         }
+                        // Breath pause between sentences
+                        let gap = crate::tts::generate_silence(0.35, sample_rate);
+                        if audio_tx.send(gap).is_err() {
+                            break;
+                        }
                     }
                     Err(e) => {
                         eprintln!(

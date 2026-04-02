@@ -30,16 +30,15 @@ pub fn split_into_speech_units(text: &str) -> Vec<SpeechUnit> {
     for segment in text.split("[pause]") {
         let segment = segment.trim();
         if segment.is_empty() {
-            // Consecutive [pause] markers — just add one pause
             if !matches!(units.last(), Some(SpeechUnit::Pause(_))) {
-                units.push(SpeechUnit::Pause(0.8));
+                units.push(SpeechUnit::Pause(SECTION_PAUSE));
             }
             continue;
         }
 
-        // Add pause before this segment if we already have content
+        // Add section pause before this segment if we already have content
         if !units.is_empty() {
-            units.push(SpeechUnit::Pause(0.8));
+            units.push(SpeechUnit::Pause(SECTION_PAUSE));
         }
 
         // Split segment into sentences
@@ -73,6 +72,11 @@ pub fn split_sentences(text: &str) -> Vec<String> {
 
     sentences
 }
+
+/// Short breath pause inserted between every sentence (seconds).
+const SENTENCE_GAP: f32 = 0.35;
+/// Longer pause for explicit [pause] markers between sections (seconds).
+const SECTION_PAUSE: f32 = 1.0;
 
 /// Generate silence as f32 samples at the given sample rate.
 pub fn generate_silence(duration_secs: f32, sample_rate: u32) -> Vec<f32> {
@@ -283,6 +287,11 @@ pub fn synthesis_loop(
                             continue;
                         }
                         if audio_tx.send(audio).is_err() {
+                            break;
+                        }
+                        // Breath pause between sentences
+                        let gap = generate_silence(SENTENCE_GAP, sample_rate);
+                        if audio_tx.send(gap).is_err() {
                             break;
                         }
                     }
