@@ -274,8 +274,9 @@ pub fn synthesis_loop(
             }
             SpeechUnit::Sentence(sentence) => {
                 sentence_idx += 1;
-                let preview = if sentence.len() > 60 {
-                    format!("{}...", &sentence[..57])
+                let preview = if sentence.chars().count() > 60 {
+                    let truncated: String = sentence.chars().take(57).collect();
+                    format!("{}...", truncated)
                 } else {
                     sentence.clone()
                 };
