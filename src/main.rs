@@ -4,6 +4,7 @@ mod dedup;
 mod document;
 mod model;
 mod output;
+mod rewrite;
 mod transcribe;
 mod tts;
 mod voice;
@@ -100,6 +101,14 @@ struct SpeakArgs {
     /// Don't play audio (only useful with --save).
     #[arg(long)]
     no_play: bool,
+    /// Rewrite document with an LLM for natural TTS narration.
+    /// Replaces diagrams with descriptions, adds pauses, smooths formatting.
+    /// Requires AWS credentials for Bedrock access.
+    #[arg(long)]
+    rewrite: bool,
+    /// LLM model ID for rewriting (Bedrock model ID).
+    #[arg(long, default_value = "us.anthropic.claude-opus-4-0-20250514")]
+    rewrite_model: String,
 }
 
 fn main() -> Result<()> {
@@ -226,13 +235,24 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
 
     // 1. Parse document
     println!("Reading {}...", args.file.display());
-    let text = document::extract_text(&args.file)?;
+    let mut text = document::extract_text(&args.file)?;
     if text.trim().is_empty() {
         bail!("No text found in {}", args.file.display());
     }
 
-    let sentences = tts::split_sentences(&text);
-    println!("Found {} sentences to speak.", sentences.len());
+    // 1b. Optional LLM rewrite for natural narration
+    if args.rewrite {
+        println!("Rewriting for natural speech (model: {})...", args.rewrite_model);
+        text = rewrite::rewrite_for_speech(&text, Some(&args.rewrite_model))?;
+        println!("Rewrite complete ({} chars).", text.len());
+    }
+
+    let units = tts::split_into_speech_units(&text);
+    let sentence_count = units
+        .iter()
+        .filter(|u| matches!(u, tts::SpeechUnit::Sentence(_)))
+        .count();
+    println!("Found {} sentences to speak.", sentence_count);
 
     // 2. Shutdown flag
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -248,7 +268,6 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
     let (audio_tx, audio_rx) = crossbeam_channel::bounded::<Vec<f32>>(4);
 
     // 4. Route to the right engine
-    let total = sentences.len();
     let source_rate: u32;
 
     let synth_handle = match args.engine.as_str() {
@@ -266,7 +285,7 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
                 .name("tts-synthesis".into())
                 .spawn(move || {
                     if let Err(e) =
-                        tts::synthesis_loop(&mut engine, sentences, total, audio_tx, shutdown_s)
+                        tts::synthesis_loop(&mut engine, units, audio_tx, shutdown_s)
                     {
                         eprintln!("Synthesis error: {}", e);
                     }
@@ -299,8 +318,7 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
                 .spawn(move || {
                     if let Err(e) = chatterbox::synthesis_loop(
                         &mut engine,
-                        sentences,
-                        total,
+                        units,
                         audio_tx,
                         shutdown_s,
                     ) {
