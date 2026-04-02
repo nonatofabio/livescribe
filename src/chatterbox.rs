@@ -251,37 +251,63 @@ impl Drop for ChatterboxEngine {
     }
 }
 
-/// Synthesize all sentences via Chatterbox, sending audio chunks through a channel.
+/// Synthesize speech units via Chatterbox, sending audio chunks through a channel.
 pub fn synthesis_loop(
     engine: &mut ChatterboxEngine,
-    sentences: Vec<String>,
-    total: usize,
+    units: Vec<crate::tts::SpeechUnit>,
     audio_tx: Sender<Vec<f32>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
-    for (i, sentence) in sentences.iter().enumerate() {
+    let total = units
+        .iter()
+        .filter(|u| matches!(u, crate::tts::SpeechUnit::Sentence(_)))
+        .count();
+    let sample_rate = engine.sample_rate();
+    let mut sentence_idx = 0;
+
+    for unit in &units {
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
-        let preview = if sentence.len() > 60 {
-            format!("{}...", &sentence[..57])
-        } else {
-            sentence.clone()
-        };
-        eprintln!("[{}/{}] {}", i + 1, total, preview);
-
-        match engine.synthesize(sentence) {
-            Ok(audio) => {
-                if audio.is_empty() {
-                    continue;
-                }
-                if audio_tx.send(audio).is_err() {
+        match unit {
+            crate::tts::SpeechUnit::Pause(duration) => {
+                let silence = crate::tts::generate_silence(*duration, sample_rate);
+                if audio_tx.send(silence).is_err() {
                     break;
                 }
             }
-            Err(e) => {
-                eprintln!("[{}/{}] Synthesis failed: {}, skipping", i + 1, total, e);
+            crate::tts::SpeechUnit::Sentence(sentence) => {
+                sentence_idx += 1;
+                let preview = if sentence.chars().count() > 60 {
+                    let truncated: String = sentence.chars().take(57).collect();
+                    format!("{}...", truncated)
+                } else {
+                    sentence.clone()
+                };
+                eprintln!("[{}/{}] {}", sentence_idx, total, preview);
+
+                match engine.synthesize(sentence) {
+                    Ok(audio) => {
+                        if audio.is_empty() {
+                            continue;
+                        }
+                        if audio_tx.send(audio).is_err() {
+                            break;
+                        }
+                        // Breath pause between sentences
+                        let gap = crate::tts::generate_silence(0.35, sample_rate);
+                        if audio_tx.send(gap).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[{}/{}] Synthesis failed: {}, skipping",
+                            sentence_idx, total, e
+                        );
+                    }
+                }
             }
         }
     }

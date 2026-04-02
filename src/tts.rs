@@ -11,6 +11,46 @@ use regex::Regex;
 
 use crate::voice::PiperConfig;
 
+/// A unit of speech: either a sentence to synthesize or a silence pause.
+#[derive(Debug, Clone)]
+pub enum SpeechUnit {
+    Sentence(String),
+    /// Silence duration in seconds.
+    Pause(f32),
+}
+
+/// Split text into speech units for TTS synthesis.
+///
+/// Recognizes `[pause]` markers (inserted by the LLM rewriter) and converts
+/// them to silence. Splits remaining text on sentence boundaries.
+pub fn split_into_speech_units(text: &str) -> Vec<SpeechUnit> {
+    let mut units = Vec::new();
+
+    // Split on [pause] markers first
+    for segment in text.split("[pause]") {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            if !matches!(units.last(), Some(SpeechUnit::Pause(_))) {
+                units.push(SpeechUnit::Pause(SECTION_PAUSE));
+            }
+            continue;
+        }
+
+        // Add section pause before this segment if we already have content
+        if !units.is_empty() {
+            units.push(SpeechUnit::Pause(SECTION_PAUSE));
+        }
+
+        // Split segment into sentences
+        let sentences = split_sentences(segment);
+        for s in sentences {
+            units.push(SpeechUnit::Sentence(s));
+        }
+    }
+
+    units
+}
+
 /// Split text into sentences for individual TTS synthesis.
 pub fn split_sentences(text: &str) -> Vec<String> {
     let re = Regex::new(r"(?:[.!?]+[\s]+|[\n]{2,})").unwrap();
@@ -31,6 +71,16 @@ pub fn split_sentences(text: &str) -> Vec<String> {
     }
 
     sentences
+}
+
+/// Short breath pause inserted between every sentence (seconds).
+const SENTENCE_GAP: f32 = 0.35;
+/// Longer pause for explicit [pause] markers between sections (seconds).
+const SECTION_PAUSE: f32 = 1.0;
+
+/// Generate silence as f32 samples at the given sample rate.
+pub fn generate_silence(duration_secs: f32, sample_rate: u32) -> Vec<f32> {
+    vec![0.0f32; (duration_secs * sample_rate as f32) as usize]
 }
 
 /// Check that espeak-ng is available on the system.
@@ -197,39 +247,59 @@ impl TtsEngine {
     }
 }
 
-/// Synthesize all sentences, sending audio chunks through a channel.
+/// Synthesize speech units (sentences + pauses), sending audio chunks through a channel.
 pub fn synthesis_loop(
     engine: &mut TtsEngine,
-    sentences: Vec<String>,
-    total: usize,
+    units: Vec<SpeechUnit>,
     audio_tx: Sender<Vec<f32>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     check_espeak()?;
 
-    for (i, sentence) in sentences.iter().enumerate() {
+    let total = units.iter().filter(|u| matches!(u, SpeechUnit::Sentence(_))).count();
+    let sample_rate = engine.sample_rate();
+    let mut sentence_idx = 0;
+
+    for unit in &units {
         if shutdown.load(Ordering::SeqCst) {
             break;
         }
 
-        let preview = if sentence.len() > 60 {
-            format!("{}...", &sentence[..57])
-        } else {
-            sentence.clone()
-        };
-        eprintln!("[{}/{}] {}", i + 1, total, preview);
-
-        match engine.synthesize(sentence) {
-            Ok(audio) => {
-                if audio.is_empty() {
-                    continue;
-                }
-                if audio_tx.send(audio).is_err() {
+        match unit {
+            SpeechUnit::Pause(duration) => {
+                let silence = generate_silence(*duration, sample_rate);
+                if audio_tx.send(silence).is_err() {
                     break;
                 }
             }
-            Err(e) => {
-                eprintln!("[{}/{}] Synthesis failed: {}, skipping", i + 1, total, e);
+            SpeechUnit::Sentence(sentence) => {
+                sentence_idx += 1;
+                let preview = if sentence.chars().count() > 60 {
+                    let truncated: String = sentence.chars().take(57).collect();
+                    format!("{}...", truncated)
+                } else {
+                    sentence.clone()
+                };
+                eprintln!("[{}/{}] {}", sentence_idx, total, preview);
+
+                match engine.synthesize(sentence) {
+                    Ok(audio) => {
+                        if audio.is_empty() {
+                            continue;
+                        }
+                        if audio_tx.send(audio).is_err() {
+                            break;
+                        }
+                        // Breath pause between sentences
+                        let gap = generate_silence(SENTENCE_GAP, sample_rate);
+                        if audio_tx.send(gap).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[{}/{}] Synthesis failed: {}, skipping", sentence_idx, total, e);
+                    }
+                }
             }
         }
     }
