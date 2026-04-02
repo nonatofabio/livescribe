@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 
-const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-opus-4-0-20250514";
+const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-opus-4-6-v1";
 
 const SYSTEM_PROMPT: &str = r##"You are an expert at adapting written documents for natural text-to-speech narration.
 

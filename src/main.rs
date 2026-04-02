@@ -107,7 +107,7 @@ struct SpeakArgs {
     #[arg(long)]
     rewrite: bool,
     /// LLM model ID for rewriting (Bedrock model ID).
-    #[arg(long, default_value = "us.anthropic.claude-opus-4-0-20250514")]
+    #[arg(long, default_value = "us.anthropic.claude-opus-4-6-v1")]
     rewrite_model: String,
 }
 
