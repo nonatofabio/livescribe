@@ -4,8 +4,9 @@
 
 <p align="center">
   <a href="#installation"><strong>Install</strong></a> &middot;
-  <a href="#listen-speech-to-text"><strong>Listen (STT)</strong></a> &middot;
-  <a href="#speak-text-to-speech"><strong>Speak (TTS)</strong></a> &middot;
+  <a href="#listen-speech-to-text"><strong>Listen</strong></a> &middot;
+  <a href="#speak-text-to-speech"><strong>Speak</strong></a> &middot;
+  <a href="#ai-rewrite"><strong>AI Rewrite</strong></a> &middot;
   <a href="#architecture"><strong>Architecture</strong></a>
 </p>
 
@@ -17,15 +18,36 @@
 
 ---
 
-A fast, cross-platform audio toolkit built in Rust — **live transcription** (STT) using [whisper.cpp](https://github.com/ggerganov/whisper.cpp) and **document reading** (TTS) using [Piper](https://github.com/rhasspy/piper).
+An AI-powered audio toolkit built in Rust. **Listen** to transcribe speech in real-time. **Speak** to turn any document into a natural-sounding audiobook, with optional LLM narration that rewrites raw text into something a human would actually want to hear.
 
 ## Features
 
-- **Listen**: Real-time speech-to-text with non-blocking pipeline, overlapping chunks, and automatic deduplication
-- **Speak**: Read documents aloud (.txt, .md, .pdf) with high-quality neural TTS voices
-- **Auto model download**: Whisper and Piper models downloaded from HuggingFace on first run
+- **Listen**: Real-time speech-to-text via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) with non-blocking capture, overlapping chunks, and automatic deduplication
+- **Speak**: Read documents aloud (.txt, .md, .pdf) with neural TTS ([Piper](https://github.com/rhasspy/piper) or [Chatterbox](https://github.com/resemble-ai/chatterbox))
+- **AI Rewrite**: `--rewrite` sends your document through Claude to adapt it for narration — diagrams become descriptions, headings become transitions, lists become prose, and natural pauses are inserted between sections
+- **Two TTS engines**: Piper (fast, native Rust, no Python) or Chatterbox (state-of-the-art quality, voice cloning, auto-managed Python venv)
+- **Auto model download**: All models downloaded from HuggingFace on first run and cached locally
 - **Cross-platform**: macOS (CoreAudio), Linux (ALSA), Windows (WASAPI) via cpal
-- **GPU acceleration**: Optional Metal (macOS), CUDA (NVIDIA), and CoreML support for transcription
+- **GPU acceleration**: Optional Metal (macOS), CUDA (NVIDIA), and CoreML support
+
+## Quick Start
+
+```bash
+# Install
+cargo install --path .
+
+# Transcribe a meeting in real-time
+livescribe listen
+
+# Read a PDF aloud
+livescribe speak paper.pdf
+
+# Read a PDF with AI narration (diagrams described, natural pacing)
+livescribe speak paper.pdf --rewrite
+
+# Save as audiobook WAV
+livescribe speak book.md --rewrite --save audiobook.wav --no-play
+```
 
 ## Installation
 
@@ -104,7 +126,7 @@ livescribe listen --list-devices
 
 ## Speak (Text-to-Speech)
 
-Read documents aloud using Piper neural TTS.
+Read documents aloud using neural TTS.
 
 ```bash
 # Read a text file (auto-downloads voice model on first run, ~63 MB)
@@ -116,31 +138,86 @@ livescribe speak notes.md --voice en_US-lessac-medium
 # Read a PDF and save to WAV
 livescribe speak paper.pdf --save output.wav
 
-# Save without playing
-livescribe speak doc.txt --save output.wav --no-play
+# High-quality with Chatterbox (auto-installs Python venv on first use)
+livescribe speak doc.txt --engine chatterbox
+
+# Voice cloning with Chatterbox
+livescribe speak doc.txt --engine chatterbox --voice my_voice.wav
 
 # Adjust speech speed (2x faster)
 livescribe speak doc.txt --speed 2.0
-
-# List available voices
-livescribe speak --list-voices
-
-# List available output devices
-livescribe speak --list-devices
 ```
 
 ### Speak Options
 
 ```
-  <FILE>                    Document to read (.txt, .md, .pdf)
-  -v, --voice <NAME>        Piper voice [default: en_US-amy-medium]
-  -s, --save <PATH>         Save audio to WAV file
-      --speed <FLOAT>       Speech speed multiplier [default: 1.0]
-  -d, --device <INDEX>      Audio output device index
-      --list-voices         List available voices
-      --list-devices        List output devices
-      --no-play             Don't play audio (use with --save)
+  <FILE>                          Document to read (.txt, .md, .pdf)
+  -e, --engine <ENGINE>           TTS engine: piper or chatterbox [default: piper]
+  -v, --voice <NAME>              Piper voice name or Chatterbox ref .wav [default: en_US-amy-medium]
+  -s, --save <PATH>               Save audio to WAV file
+      --speed <FLOAT>             Speech speed multiplier [default: 1.0]
+  -d, --device <INDEX>            Audio output device index
+      --rewrite                   AI-rewrite document for natural narration
+      --rewrite-model <MODEL_ID>  Bedrock model ID [default: Claude Opus 4.6]
+      --verbose                   Show debug output (API calls, timing, tokens)
+      --list-voices               List available voices
+      --list-devices              List output devices
+      --no-play                   Don't play audio (use with --save)
 ```
+
+---
+
+## AI Rewrite
+
+The `--rewrite` flag is what makes livescribe different from other TTS tools. Instead of reading raw document text (which sounds robotic and includes things like ASCII diagrams, markdown syntax, and URLs), it sends the text through Claude to produce natural narration.
+
+### What it does
+
+| Raw document | After --rewrite |
+|---|---|
+| `## Architecture` | "Now let's talk about the architecture." |
+| ASCII diagram of a pipeline | "The diagram shows a three-stage pipeline flowing from audio capture to transcription to output." |
+| `- Fast inference` | "First, it offers fast inference." |
+| `https://github.com/user/repo` | "the GitHub repository" |
+| `$10.5M` | "ten and a half million dollars" |
+| Section boundary | 1-second natural pause |
+| Sentence boundary | 350ms breath pause |
+
+### Usage
+
+```bash
+# Basic: rewrite then speak
+livescribe speak README.md --rewrite
+
+# Save rewritten audiobook
+livescribe speak thesis.pdf --rewrite --save thesis.wav --no-play
+
+# Use a different Claude model
+livescribe speak doc.md --rewrite --rewrite-model us.anthropic.claude-sonnet-4-6-v1
+
+# Debug: see chunking, API timing, token usage
+livescribe speak doc.pdf --rewrite --verbose
+```
+
+### How it works
+
+1. Document is extracted (txt/md/pdf) and split into ~15k character chunks
+2. Each chunk is sent to Claude via the AWS Bedrock Converse API
+3. Claude rewrites it for natural speech, inserting `[pause]` markers between sections
+4. The rewritten text is split into speech units (sentences + pauses)
+5. Piper synthesizes each sentence with 350ms breath gaps and 1s section pauses
+
+Requires AWS credentials with Bedrock access (`aws configure` or `AWS_PROFILE`).
+
+### TTS Engines
+
+| | Piper (default) | Chatterbox |
+|---|---|---|
+| Quality | Good neural TTS | State-of-the-art |
+| Speed | Real-time on CPU | Slower (GPU recommended) |
+| Size | ~63MB per voice | ~1.5GB model |
+| Voice cloning | No | Yes |
+| Dependencies | None (native Rust) | Python 3.11 (auto-managed) |
 
 ### Piper Voices
 
@@ -156,9 +233,9 @@ livescribe speak --list-devices
 
 ### Supported Document Formats
 
-- **`.txt`** — Plain text, read as-is
-- **`.md`** — Markdown with formatting stripped (code blocks skipped)
-- **`.pdf`** — PDF text extraction (text-based PDFs only)
+- **`.txt`** — Plain text
+- **`.md`** — Markdown (code blocks skipped, formatting stripped)
+- **`.pdf`** — PDF text extraction (text-based PDFs)
 
 ---
 
@@ -166,16 +243,17 @@ livescribe speak --list-devices
 
 ### Listen Pipeline (3 threads)
 ```
-[Audio Thread] → [Transcription Thread] → [Output / Main Thread]
-    cpal            whisper.cpp               file + stdout
- (never stops)     (CPU-bound)              (dedup + write)
+[Audio Thread] --> [Transcription Thread] --> [Output / Main Thread]
+    cpal              whisper.cpp                file + stdout
+ (never stops)       (CPU-bound)              (dedup + write)
 ```
 
-### Speak Pipeline (2 threads)
+### Speak Pipeline (2-3 threads)
 ```
-[Synthesis Thread] → [Playback / Main Thread]
-  espeak-ng + Piper       cpal output stream
-   (CPU-bound)           (resample + play)
+                          (optional)
+[Document] --> [LLM Rewrite] --> [Synthesis Thread] --> [Playback / Main Thread]
+  txt/md/pdf    Claude/Bedrock     Piper or Chatterbox     cpal output stream
+                                    (CPU-bound)           (resample + play)
 ```
 
 Both pipelines use bounded crossbeam channels with backpressure. Recording never pauses during transcription. Ctrl+C triggers graceful shutdown with no data loss.
@@ -189,7 +267,7 @@ brew install blackhole-2ch
 ```
 
 1. Open **Audio MIDI Setup** (Applications > Utilities)
-2. Click **+** → Create **Multi-Output Device**
+2. Click **+** --> Create **Multi-Output Device**
 3. Check both **BlackHole 2ch** and your **Built-in Output**
 4. Set the Multi-Output Device as system output in **System Settings > Sound**
 5. Run `livescribe listen` and select BlackHole as the input device
@@ -209,6 +287,11 @@ sudo apt install espeak-ng # Linux
 ### High latency / "Transcription falling behind"
 - Use a faster model: `--model small` or `--model base`
 - Enable GPU acceleration: build with `--features metal` (macOS)
+
+### Bedrock API errors with --rewrite
+- Run `aws configure` or set `AWS_PROFILE`
+- Ensure your IAM role has `bedrock:InvokeModel` permission
+- Check the region has Claude Opus 4.6 enabled
 
 ### Build errors
 - Ensure C/C++ compiler: `xcode-select --install` (macOS) or `sudo apt install build-essential` (Linux)
