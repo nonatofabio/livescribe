@@ -1,3 +1,7 @@
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use anyhow::{bail, Context, Result};
 
 const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-opus-4-6-v1";
@@ -28,13 +32,71 @@ Rules:
 10. Output only the rewritten text. No preamble, no commentary, no markdown formatting.
 "##;
 
+/// The writing animation text that scrolls under the pen.
+const WRITING_TEXT: &str = "Rewriting for natural speech narration using AI ";
+
+/// Runs a writing animation on stderr while `alive` is true.
+/// Shows text growing character by character with a pen at the end,
+/// then scrolling left once it hits max width.
+fn writing_animation(alive: Arc<AtomicBool>) {
+    let pen = '\u{270D}'; // ✍
+    let max_width: usize = 48;
+    let chars: Vec<char> = WRITING_TEXT.chars().collect();
+    let mut pos: usize = 0;
+
+    while alive.load(Ordering::SeqCst) {
+        let display = if pos < max_width {
+            // Growing phase: text appears character by character
+            let end = pos.min(chars.len());
+            let text: String = chars[..end].iter().collect();
+            format!("{}{}", text, pen)
+        } else {
+            // Scrolling phase: text slides left, pen stays at right edge
+            let scroll = pos - max_width;
+            let start = scroll % chars.len();
+            let text: String = (0..max_width)
+                .map(|i| chars[(start + i) % chars.len()])
+                .collect();
+            format!("{}{}", text, pen)
+        };
+
+        eprint!("\r  {}\x1b[K", display);
+        let _ = std::io::stderr().flush();
+
+        pos += 1;
+        std::thread::sleep(std::time::Duration::from_millis(80));
+    }
+
+    // Clear the animation line
+    eprint!("\r\x1b[K");
+    let _ = std::io::stderr().flush();
+}
+
 /// Rewrite document text for natural TTS narration using Claude via Bedrock.
 ///
-/// Uses the Converse API with the specified model. Defaults to Claude Opus 4.
+/// Shows a writing animation while the API call is in-flight.
+/// Uses the Converse API with the specified model. Defaults to Claude Opus 4.6.
 /// Requires AWS credentials in the environment (AWS_PROFILE, env vars, or IAM role).
 pub fn rewrite_for_speech(text: &str, model_id: Option<&str>) -> Result<String> {
     let model = model_id.unwrap_or(DEFAULT_MODEL_ID);
 
+    // Start the writing animation
+    let alive = Arc::new(AtomicBool::new(true));
+    let alive_clone = alive.clone();
+    let anim_handle = std::thread::Builder::new()
+        .name("rewrite-anim".into())
+        .spawn(move || writing_animation(alive_clone))?;
+
+    let result = do_rewrite(text, model);
+
+    // Stop animation
+    alive.store(false, Ordering::SeqCst);
+    let _ = anim_handle.join();
+
+    result
+}
+
+fn do_rewrite(text: &str, model: &str) -> Result<String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
