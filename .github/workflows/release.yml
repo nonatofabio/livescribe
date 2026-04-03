@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
@@ -43,13 +44,28 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          # whisper.cpp's GGML_NATIVE=ON (default) uses -mcpu=native which
+          # enables i8mm ARM NEON intrinsics on CI. The cmake crate then
+          # overrides with --target=arm64-apple-macosx flags that don't
+          # include i8mm, causing a compilation error. Setting -mcpu=generic
+          # in CFLAGS prevents the native CPU detection from adding i8mm.
+          CFLAGS: ${{ matrix.os == 'macos-latest' && '-mcpu=generic' || '' }}
+          CXXFLAGS: ${{ matrix.os == 'macos-latest' && '-mcpu=generic' || '' }}
 
       - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.name }}.tar.gz livescribe
           cd ../../..
-          shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+
+      - name: Generate checksum
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          else
+            sha256sum ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
