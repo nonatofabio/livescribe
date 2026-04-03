@@ -33,7 +33,10 @@ An AI-powered audio toolkit built in Rust. **Listen** to transcribe speech in re
 ## Quick Start
 
 ```bash
-# Install
+# One-line install (macOS ARM64, Linux x64)
+curl -fsSL https://raw.githubusercontent.com/nonatofabio/livescribe/main/install.sh | sh
+
+# Or build from source
 cargo install --path .
 
 # Transcribe a meeting in real-time
@@ -51,8 +54,17 @@ livescribe speak book.md --rewrite --save audiobook.wav --no-play
 
 ## Installation
 
-### Prerequisites
+### Pre-built binaries (easiest)
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/nonatofabio/livescribe/main/install.sh | sh
+```
+
+Downloads the latest release for your platform and installs to `/usr/local/bin`. You still need the system dependencies below.
+
+### From source
+
+Requires:
 - Rust toolchain ([rustup](https://rustup.rs/))
 - C/C++ compiler (Xcode CLI Tools on macOS, gcc on Linux, MSVC on Windows)
 - `espeak-ng` for TTS phonemization:
