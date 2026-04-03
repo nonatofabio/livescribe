@@ -42,16 +42,20 @@ jobs:
         run: |
           brew install cmake espeak-ng
 
+      - name: Patch whisper.cpp to disable GGML_NATIVE on ARM CI
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          # Pre-fetch the whisper-rs-sys crate so we can patch its cmake
+          cargo fetch --target ${{ matrix.target }}
+          # Find the whisper-rs-sys source and disable GGML_NATIVE
+          WHISPER_SYS=$(find ~/.cargo/registry/src -path '*/whisper-rs-sys-*/build.rs' | head -1)
+          WHISPER_DIR=$(dirname "$WHISPER_SYS")
+          # Patch: set GGML_NATIVE OFF in the build.rs cmake config
+          sed -i '' 's/\.define("WHISPER_BUILD_EXAMPLES", "OFF")/\.define("WHISPER_BUILD_EXAMPLES", "OFF")\n        .define("GGML_NATIVE", "OFF")/' "$WHISPER_SYS"
+          echo "Patched $WHISPER_SYS to add GGML_NATIVE=OFF"
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          # whisper.cpp's GGML_NATIVE=ON (default) uses -mcpu=native which
-          # enables i8mm ARM NEON intrinsics on CI. The cmake crate then
-          # overrides with --target=arm64-apple-macosx flags that don't
-          # include i8mm, causing a compilation error. Setting -mcpu=generic
-          # in CFLAGS prevents the native CPU detection from adding i8mm.
-          CFLAGS: ${{ matrix.os == 'macos-latest' && '-mcpu=generic' || '' }}
-          CXXFLAGS: ${{ matrix.os == 'macos-latest' && '-mcpu=generic' || '' }}
 
       - name: Package binary
         run: |
