@@ -170,7 +170,9 @@ livescribe speak doc.txt --speed 2.0
       --speed <FLOAT>             Speech speed multiplier [default: 1.0]
   -d, --device <INDEX>            Audio output device index
       --rewrite                   AI-rewrite document for natural narration
-      --rewrite-model <MODEL_ID>  Bedrock model ID [default: Claude Opus 4.6]
+      --rewrite-model <MODEL_ID>  Bedrock model ID [default: Claude Sonnet 4.6]
+      --save-rewrite <PATH>       Save LLM-rewritten text for inspection
+      --save-extract <PATH>       Save pre-rewrite extracted text for inspection
       --verbose                   Show debug output (API calls, timing, tokens)
       --list-voices               List available voices
       --list-devices              List output devices
@@ -204,8 +206,11 @@ livescribe speak README.md --rewrite
 # Save rewritten audiobook
 livescribe speak thesis.pdf --rewrite --save thesis.wav --no-play
 
-# Use a different Claude model
-livescribe speak doc.md --rewrite --rewrite-model us.anthropic.claude-sonnet-4-6-v1
+# Use a different Claude model (e.g. Opus for highest quality)
+livescribe speak doc.md --rewrite --rewrite-model us.anthropic.claude-opus-4-6-v1
+
+# Inspect what the LLM produced before synthesis
+livescribe speak doc.pdf --rewrite --save-rewrite rewrite.txt --save-extract raw.txt
 
 # Debug: see chunking, API timing, token usage
 livescribe speak doc.pdf --rewrite --verbose
@@ -303,7 +308,7 @@ sudo apt install espeak-ng # Linux
 ### Bedrock API errors with --rewrite
 - Run `aws configure` or set `AWS_PROFILE`
 - Ensure your IAM role has `bedrock:InvokeModel` permission
-- Check the region has Claude Opus 4.6 enabled
+- Check the region has Claude Sonnet 4.6 enabled (or use `--rewrite-model` to pick another)
 
 ### Build errors
 - Ensure C/C++ compiler: `xcode-select --install` (macOS) or `sudo apt install build-essential` (Linux)

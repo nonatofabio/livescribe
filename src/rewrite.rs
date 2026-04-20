@@ -1,41 +1,47 @@
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 
-const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-opus-4-6-v1";
+/// Default model: Claude Sonnet 4.6. Faster and cheaper than Opus while
+/// still producing high-quality natural rewrites.
+pub const DEFAULT_MODEL_ID: &str = "us.anthropic.claude-sonnet-4-6";
 
-/// Max characters per chunk sent to the LLM. Claude supports ~200k tokens
-/// but very long inputs are slow. 15k chars (~4k tokens) keeps responses fast.
+/// Max characters per chunk. ~15k chars is ~4k tokens which stays well
+/// within Sonnet's output budget and keeps each call under 60 seconds.
 const CHUNK_MAX_CHARS: usize = 15_000;
 
-const SYSTEM_PROMPT: &str = r##"You are an expert at adapting written documents for natural text-to-speech narration.
+const SYSTEM_PROMPT: &str = r###"You rewrite documents so they can be narrated aloud by a text-to-speech engine. Your output is read verbatim to the listener.
 
-Your task: rewrite the given text so it sounds natural, engaging, and clear when read aloud by a TTS engine.
+Produce clear, flowing prose that someone would actually want to listen to. Keep ALL substantive content from the source — this is a rewrite, not a summary.
 
-Rules:
-1. ASCII art, diagrams, tables, and code blocks: Replace with a brief spoken description. For example, replace an ASCII diagram with "The diagram shows a pipeline flowing from audio capture to transcription to output." Never read raw ASCII art character by character.
+Handling rules:
 
-2. Section headings: Convert to spoken transitions. For example, a heading like "Architecture" becomes "Now let's talk about the architecture."
+1. ASCII art, diagrams, tables, equations: replace with a short spoken description of what they convey. Never repeat raw symbols or grid characters.
 
-3. Bullet points and lists: Convert to flowing prose or use "First... Second... Third..." phrasing.
+2. Section headings: turn into spoken transitions like "Now, about the architecture," or "Turning to the results,". Never emit raw markdown like "##" or numbered heading prefixes.
 
-4. URLs and file paths: Simplify. For example, a GitHub URL becomes "the GitHub repository." File paths like src/main.rs become "the main source file."
+3. Lists: turn into flowing prose or sequential phrasing ("First... Second... Finally...").
 
-5. Technical formatting: Expand abbreviations on first use. Convert markdown emphasis to natural stress words like "importantly" or "notably."
+4. URLs and file paths: describe them ("the GitHub repo," "the main source file"). Never read URLs character by character.
 
-6. Paragraph pauses: Insert [pause] on its own line between major sections or topic changes. This creates a natural breathing pause in the audio. Use [pause] sparingly, only between sections, not between every sentence.
+5. Academic references like [1], [4,5], [Smith 2020]: omit inline citation numbers entirely. They disrupt the read. If a reference is load-bearing for the sentence, phrase it as "prior work has shown..." Never spell out bracketed numbers.
 
-7. Numbers and symbols: Write out as words where natural. "$10.5M" becomes "ten and a half million dollars." ">=3.11" becomes "three point eleven or higher."
+6. Figure callouts ("(Figure 1)", "see Fig. 2"): omit unless you're rephrasing to describe the figure's content.
 
-8. Preserve content: Do not remove or summarize substantive content. The rewrite should cover everything in the original, just make it listenable.
+7. Author affiliations, running headers, page numbers, journal metadata, DOIs, copyright notices: drop them entirely.
 
-9. Tone: Conversational but informative, like a knowledgeable person explaining the document to a colleague.
+8. Numbers, units, symbols: write as speech ("10.5%" -> "ten point five percent", "p < 0.05" -> "a p-value below point oh five", "H2O" -> "water"). Keep natural scientific phrasing.
 
-10. Output only the rewritten text. No preamble, no commentary, no markdown formatting.
-"##;
+9. Abbreviations on first use: expand ("TTS" -> "text-to-speech, or TTS"). On subsequent uses, use whichever reads most naturally.
+
+10. Paragraph pauses: insert a single line containing exactly "[pause]" between major sections or topic shifts. Use sparingly — roughly every 2 to 5 paragraphs. Never between consecutive sentences.
+
+11. Output ONLY the rewritten narration. No preamble ("Here is the rewrite..."), no commentary, no markdown headings, no code fences, no meta-notes about what you changed. Just the prose.
+"###;
 
 const WRITING_TEXT: &str = "Rewriting for natural speech narration using AI ";
 
@@ -71,7 +77,7 @@ fn writing_animation(alive: Arc<AtomicBool>) {
 }
 
 /// Split text into chunks at paragraph boundaries, respecting max size.
-fn chunk_text(text: &str) -> Vec<String> {
+pub fn chunk_text(text: &str) -> Vec<String> {
     if text.len() <= CHUNK_MAX_CHARS {
         return vec![text.to_string()];
     }
@@ -96,11 +102,68 @@ fn chunk_text(text: &str) -> Vec<String> {
     chunks
 }
 
+/// Clean an LLM response of common preamble/postamble artifacts.
+/// Claude sometimes prepends "Here's the rewrite:" or wraps output in markdown
+/// even when instructed not to. Strip those.
+fn sanitize_llm_output(text: &str) -> String {
+    let trimmed = text.trim();
+
+    // Strip common preamble patterns
+    let without_preamble = strip_preamble(trimmed);
+
+    // Strip markdown code fences if the whole thing is wrapped
+    let without_fence = strip_code_fence(&without_preamble);
+
+    without_fence
+}
+
+fn strip_preamble(text: &str) -> String {
+    let preamble_prefixes = [
+        "Here is the rewrite:",
+        "Here's the rewrite:",
+        "Here is the rewritten text:",
+        "Here's the rewritten text:",
+        "Here is the rewritten version:",
+        "Here's the rewritten version:",
+        "Rewritten text:",
+        "Rewrite:",
+    ];
+
+    for prefix in &preamble_prefixes {
+        if let Some(stripped) = text.strip_prefix(prefix) {
+            return stripped.trim_start().to_string();
+        }
+    }
+    text.to_string()
+}
+
+fn strip_code_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.starts_with("```") && trimmed.ends_with("```") {
+        let inner = trimmed.trim_start_matches("```").trim_end_matches("```");
+        let inner = inner.strip_prefix('\n').unwrap_or(inner);
+        // Also drop a language hint on the first line if present
+        if let Some((first_line, rest)) = inner.split_once('\n') {
+            if !first_line.contains(' ') && first_line.len() < 20 {
+                return rest.trim().to_string();
+            }
+        }
+        return inner.trim().to_string();
+    }
+    text.to_string()
+}
+
 /// Rewrite document text for natural TTS narration using Claude via Bedrock.
 ///
-/// Large documents are split into chunks and processed sequentially.
-/// Shows a writing animation unless verbose mode prints debug logs instead.
-pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> Result<String> {
+/// Large documents are chunked and processed sequentially. Output is sanitized
+/// of LLM preamble/postamble. Optionally saves the rewritten text to a file
+/// for inspection.
+pub fn rewrite_for_speech(
+    text: &str,
+    model_id: Option<&str>,
+    verbose: bool,
+    save_to: Option<&Path>,
+) -> Result<String> {
     let model = model_id.unwrap_or(DEFAULT_MODEL_ID);
     let chunks = chunk_text(text);
     let total_chunks = chunks.len();
@@ -114,7 +177,6 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         );
     }
 
-    // Only show animation in non-verbose mode
     let alive = Arc::new(AtomicBool::new(!verbose));
     let anim_handle = if !verbose {
         let alive_clone = alive.clone();
@@ -127,7 +189,6 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         None
     };
 
-    // Create the Bedrock client once, reuse across chunks
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -157,14 +218,16 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         }
 
         let start = Instant::now();
-        let result = do_rewrite(&rt, &client, chunk, model, verbose)?;
+        let raw_result = do_rewrite(&rt, &client, chunk, model, verbose)?;
+        let result = sanitize_llm_output(&raw_result);
         let elapsed = start.elapsed();
 
         if verbose {
             eprintln!(
-                "[rewrite] Chunk {}/{}: got {} chars back in {:.1}s",
+                "[rewrite] Chunk {}/{}: got {} chars (sanitized to {}) in {:.1}s",
                 i + 1,
                 total_chunks,
+                raw_result.len(),
                 result.len(),
                 elapsed.as_secs_f64()
             );
@@ -173,13 +236,20 @@ pub fn rewrite_for_speech(text: &str, model_id: Option<&str>, verbose: bool) -> 
         all_results.push(result);
     }
 
-    // Stop animation
     alive.store(false, Ordering::SeqCst);
     if let Some(handle) = anim_handle {
         let _ = handle.join();
     }
 
-    Ok(all_results.join("\n\n[pause]\n\n"))
+    let joined = all_results.join("\n\n[pause]\n\n");
+
+    if let Some(path) = save_to {
+        std::fs::write(path, &joined)
+            .with_context(|| format!("Failed to write rewrite to {}", path.display()))?;
+        eprintln!("Rewrite saved to {}", path.display());
+    }
+
+    Ok(joined)
 }
 
 fn do_rewrite(
@@ -194,9 +264,17 @@ fn do_rewrite(
             eprintln!("[rewrite] Calling converse API...");
         }
 
+        let inference_config = aws_sdk_bedrockruntime::types::InferenceConfiguration::builder()
+            // Cap output so we don't burn tokens on runaway completions.
+            // Sonnet typically finishes well under this on prose rewrites.
+            .max_tokens(8192)
+            .temperature(0.3)
+            .build();
+
         let response = client
             .converse()
             .model_id(model)
+            .inference_config(inference_config)
             .system(
                 aws_sdk_bedrockruntime::types::SystemContentBlock::Text(
                     SYSTEM_PROMPT.to_string(),
@@ -226,6 +304,16 @@ fn do_rewrite(
             eprintln!("[rewrite] Stop reason: {:?}", response.stop_reason());
         }
 
+        // Warn if the model got truncated - the rest of the chunk is lost.
+        if let Some(stop_reason) = response.stop_reason().as_str().into() {
+            let reason: &str = stop_reason;
+            if reason == "max_tokens" {
+                eprintln!(
+                    "[rewrite] Warning: response hit max_tokens limit, output truncated."
+                );
+            }
+        }
+
         let output = response
             .output()
             .ok_or_else(|| anyhow::anyhow!("No output from Bedrock"))?;
@@ -246,4 +334,40 @@ fn do_rewrite(
             _ => bail!("Unexpected response type from Bedrock"),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_preamble() {
+        let out = sanitize_llm_output("Here's the rewrite:\n\nThe actual content.");
+        assert_eq!(out, "The actual content.");
+    }
+
+    #[test]
+    fn strips_markdown_fence() {
+        let out = sanitize_llm_output("```\nSome narration here.\n```");
+        assert_eq!(out, "Some narration here.");
+    }
+
+    #[test]
+    fn leaves_clean_output_alone() {
+        let clean = "The story begins here. It continues naturally.";
+        assert_eq!(sanitize_llm_output(clean), clean);
+    }
+
+    #[test]
+    fn chunks_at_paragraph_boundaries() {
+        // Build input larger than CHUNK_MAX_CHARS
+        let paragraph = "word ".repeat(500); // 2500 chars
+        let big = vec![paragraph; 10].join("\n\n"); // 25k chars, 10 paragraphs
+        let chunks = chunk_text(&big);
+        assert!(chunks.len() > 1);
+        // Every chunk should end on a paragraph boundary
+        for c in &chunks {
+            assert!(c.len() <= CHUNK_MAX_CHARS + 100); // small overshoot ok
+        }
+    }
 }

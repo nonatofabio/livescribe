@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 
 pub use transcribe::{Segment, TranscriptionResult};
@@ -107,8 +107,14 @@ struct SpeakArgs {
     #[arg(long)]
     rewrite: bool,
     /// LLM model ID for rewriting (Bedrock model ID).
-    #[arg(long, default_value = "us.anthropic.claude-opus-4-6-v1")]
+    #[arg(long, default_value = "us.anthropic.claude-sonnet-4-6")]
     rewrite_model: String,
+    /// Save the LLM-rewritten text to a file for inspection.
+    #[arg(long)]
+    save_rewrite: Option<PathBuf>,
+    /// Save the extracted document text (pre-rewrite) to a file for inspection.
+    #[arg(long)]
+    save_extract: Option<PathBuf>,
     /// Show verbose debug output (API calls, chunk sizes, timing).
     #[arg(long)]
     verbose: bool,
@@ -243,10 +249,22 @@ fn run_speak(args: SpeakArgs) -> Result<()> {
         bail!("No text found in {}", args.file.display());
     }
 
+    // 1a. Optionally save the extracted text for inspection.
+    if let Some(ref path) = args.save_extract {
+        std::fs::write(path, &text)
+            .with_context(|| format!("Failed to save extract to {}", path.display()))?;
+        println!("Extracted text saved to {}", path.display());
+    }
+
     // 1b. Optional LLM rewrite for natural narration
     if args.rewrite {
         println!("Rewriting for natural speech (model: {})...", args.rewrite_model);
-        text = rewrite::rewrite_for_speech(&text, Some(&args.rewrite_model), args.verbose)?;
+        text = rewrite::rewrite_for_speech(
+            &text,
+            Some(&args.rewrite_model),
+            args.verbose,
+            args.save_rewrite.as_deref(),
+        )?;
         println!("Rewrite complete ({} chars).", text.len());
     }
 
